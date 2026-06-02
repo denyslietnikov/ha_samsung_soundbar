@@ -3,8 +3,10 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ACCESS_TOKEN
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pysmartthings import SmartThings
+from pysmartthings.exceptions import SmartThingsAuthenticationFailedError
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import (
@@ -44,7 +46,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if device_id not in domain_config.devices:
 
-        smart_things_device = await api.get_device(device_id)
+        try:
+            _LOGGER.debug(
+                "[%s] Validating SmartThings authentication for device %s",
+                DOMAIN,
+                device_id,
+            )
+
+            smart_things_device = await api.get_device(device_id)
+
+        except SmartThingsAuthenticationFailedError as err:
+            _LOGGER.error(
+                "[%s] SmartThings authentication failed. "
+                "The token may have expired, been revoked, or is no longer valid.",
+                DOMAIN,
+            )
+
+            raise ConfigEntryAuthFailed(
+                "SmartThings token is no longer valid"
+            ) from err
+
+        except Exception as err:
+            _LOGGER.exception(
+                "[%s] Unexpected error while loading device %s",
+                DOMAIN,
+                device_id,
+            )
+            raise
 
         session = async_get_clientsession(hass)
 
@@ -69,7 +97,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await soundbar_device.update()
 
         domain_config.devices[device_id] = DeviceConfig(
-            entry.data, soundbar_device
+            entry.data,
+            soundbar_device,
         )
 
         _LOGGER.info("[%s] Device initialized successfully", DOMAIN)
