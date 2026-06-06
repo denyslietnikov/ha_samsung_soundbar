@@ -382,6 +382,32 @@ class SoundbarDevice:
     def device_name(self):
         return self.__device_name
 
+    def has_status_capability(self, capability: str) -> bool:
+        has_capability = getattr(self.device.status, "has_capability", None)
+        if callable(has_capability):
+            return bool(has_capability(capability))
+        return bool(self.device.status.attributes.get(capability))
+
+    @property
+    def can_turn_on_off(self) -> bool:
+        return self.has_status_capability("switch")
+
+    @property
+    def can_control_volume(self) -> bool:
+        return self.has_status_capability("audioVolume")
+
+    @property
+    def can_mute_volume(self) -> bool:
+        return self.has_status_capability("audioMute")
+
+    @property
+    def can_control_playback(self) -> bool:
+        return self.has_status_capability("mediaPlayback")
+
+    @property
+    def can_select_sound_mode(self) -> bool:
+        return bool(self.__enable_soundmode and self.supported_soundmodes)
+
     # ------------ ON / OFF ------------
 
     @property
@@ -435,13 +461,13 @@ class SoundbarDevice:
     async def mute_volume(self, mute: bool):
         if mute:
             await self.__call_smartthings(
-                lambda: self.device.unmute(True),
-                "unmute volume",
+                lambda: self.device.mute(True),
+                "mute volume",
             )
         else:
             await self.__call_smartthings(
-                lambda: self.device.mute(True),
-                "mute volume",
+                lambda: self.device.unmute(True),
+                "unmute volume",
             )
 
     async def volume_up(self):
@@ -481,6 +507,14 @@ class SoundbarDevice:
         if self.media_app_name in ("AirPlay", "Spotify"):
             return "WIFI"
         return self.device.status.input_source
+
+    @property
+    def sound_from_detail_name(self) -> str | None:
+        return self.device.status.sound_from_detail_name
+
+    @property
+    def sound_from_mode(self) -> int | None:
+        return self.device.status.sound_from_mode
 
     @property
     def supported_input_sources(self):

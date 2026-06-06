@@ -24,6 +24,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 entities.append(
                     InputSourceSensor(device, "input_preset", "mdi:video-input-hdmi")
                 )
+            if device.has_status_capability("samsungvd.soundFrom"):
+                entities.append(SoundFromSensor(device, "sound_from", "mdi:speaker"))
     async_add_entities(entities)
     return True
 
@@ -76,3 +78,31 @@ class InputSourceSensor(SensorEntity):
     def native_value(self) -> str | None:
         """Return the current soundbar input source."""
         return self.__device.input_source
+
+
+class SoundFromSensor(SensorEntity):
+    def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):
+        self.__device = device
+        self._attr_unique_id = f"{device.device_id}_sensor_{append_unique_id}"
+        self.__base_icon = icon_string
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self.__device.device_id)},
+            name=self.__device.device_name,
+            manufacturer=self.__device.manufacturer,
+            model=self.__device.model,
+            sw_version=self.__device.firmware_version,
+        )
+        self._attr_name = "Sound From"
+
+    @property
+    def icon(self) -> str | None:
+        return self.__base_icon
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the current Samsung sound source detail name."""
+        return self.__device.sound_from_detail_name
+
+    @property
+    def extra_state_attributes(self) -> dict[str, int | None]:
+        return {"mode": self.__device.sound_from_mode}

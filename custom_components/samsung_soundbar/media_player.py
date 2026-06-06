@@ -21,21 +21,6 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_NAME = "SmartThings Soundbar"
 CONF_MAX_VOLUME = "max_volume"
 
-SUPPORT_SMARTTHINGS_SOUNDBAR = (
-    MediaPlayerEntityFeature.PAUSE
-    | MediaPlayerEntityFeature.VOLUME_STEP
-    | MediaPlayerEntityFeature.VOLUME_MUTE
-    | MediaPlayerEntityFeature.VOLUME_SET
-    | MediaPlayerEntityFeature.TURN_OFF
-    | MediaPlayerEntityFeature.TURN_ON
-    | MediaPlayerEntityFeature.PLAY
-    | MediaPlayerEntityFeature.NEXT_TRACK
-    | MediaPlayerEntityFeature.PREVIOUS_TRACK
-    | MediaPlayerEntityFeature.STOP
-    | MediaPlayerEntityFeature.SELECT_SOUND_MODE
-)
-
-
 def addServices():
     platform = entity_platform.async_get_current_platform()
 
@@ -137,9 +122,25 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
 
     @property
     def supported_features(self):
-        features = SUPPORT_SMARTTHINGS_SOUNDBAR
+        features = MediaPlayerEntityFeature(0)
+        if self.device.can_turn_on_off:
+            features |= MediaPlayerEntityFeature.TURN_OFF
+            features |= MediaPlayerEntityFeature.TURN_ON
+        if self.device.can_control_volume:
+            features |= MediaPlayerEntityFeature.VOLUME_STEP
+            features |= MediaPlayerEntityFeature.VOLUME_SET
+        if self.device.can_mute_volume:
+            features |= MediaPlayerEntityFeature.VOLUME_MUTE
+        if self.device.can_control_playback:
+            features |= MediaPlayerEntityFeature.PAUSE
+            features |= MediaPlayerEntityFeature.PLAY
+            features |= MediaPlayerEntityFeature.STOP
+            features |= MediaPlayerEntityFeature.NEXT_TRACK
+            features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
         if self.device.can_select_source:
             features |= MediaPlayerEntityFeature.SELECT_SOURCE
+        if self.device.can_select_sound_mode:
+            features |= MediaPlayerEntityFeature.SELECT_SOUND_MODE
         return features
 
     @property
@@ -202,6 +203,8 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
 
     @property
     def sound_mode_list(self) -> list[str] | None:
+        if not self.device.can_select_sound_mode:
+            return None
         return self.device.supported_soundmodes
 
     async def async_select_sound_mode(self, sound_mode):

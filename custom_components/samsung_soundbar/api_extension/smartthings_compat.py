@@ -152,6 +152,17 @@ class SmartThingsStatusCompat:
         )
         return sources if isinstance(sources, list) else []
 
+    @property
+    def sound_from_detail_name(self) -> str | None:
+        """Return the current Samsung sound source detail name."""
+        return self._value("samsungvd.soundFrom", "detailName")
+
+    @property
+    def sound_from_mode(self) -> int | None:
+        """Return the current Samsung sound source mode."""
+        value = self._value("samsungvd.soundFrom", "mode")
+        return int(value) if value is not None else None
+
 
 class SmartThingsDeviceCompat:
     """Expose old DeviceEntity methods on top of current pysmartthings."""
