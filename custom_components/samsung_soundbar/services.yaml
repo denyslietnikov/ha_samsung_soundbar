@@ -165,3 +165,44 @@ set_space_fit_sound:
       default: false
       selector:
         boolean:
+
+dump_execute_payload:
+  name: Dump execute payload
+  description: Request SmartThings execute hrefs and return the raw payload for diagnostics.
+  fields:
+    device_id:
+      name: Device
+      description: Samsung Soundbar device. Required only when multiple soundbars are loaded.
+      required: false
+      selector:
+        device:
+          integration: samsung_soundbar
+    preset:
+      name: Preset
+      description: Known SmartThings execute href group to dump. Ignored when href is provided.
+      required: false
+      default: all
+      selector:
+        select:
+          options:
+            - all
+            - advancedaudio
+            - spacefitSound
+            - activeVoiceAmplifier
+            - channelVolume
+            - surroundspeaker
+            - eq
+            - soundmode
+            - woofer
+            - sync
+            - virtual
+            - moderateBass
+            - soundGrouping
+            - privateRear
+    href:
+      name: Href
+      description: Custom execute href, for example /sec/networkaudio/advancedaudio.
+      required: false
+      example: /sec/networkaudio/advancedaudio
+      selector:
+        text:

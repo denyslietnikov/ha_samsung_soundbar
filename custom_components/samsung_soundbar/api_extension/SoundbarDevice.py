@@ -1,6 +1,7 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 import datetime
+import json
 import logging
 import re
 from typing import Any, TypeVar
@@ -75,6 +76,7 @@ class SoundbarDevice:
         self.__media_cover_url: str | None = None
         self.__media_cover_url_update_time: datetime.datetime | None = None
         self.__old_media_key = ""
+        self.__last_execute_payload_dump: dict[str, Any] | None = None
 
         self.__max_volume = max_volume
 
@@ -93,7 +95,7 @@ class SoundbarDevice:
             await self._update_soundmode()
         if self.__enable_advanced_audio:
             await self._update_advanced_audio()
-        if self.__enable_soundmode:
+        if self.__enable_woofer:
             await self._update_woofer()
         if self.__enable_eq:
             await self._update_equalizer()
@@ -219,59 +221,109 @@ class SoundbarDevice:
             flags=re.IGNORECASE,
         )
 
-    async def _update_soundmode(self):
-        await self.update_execution_data(["/sec/networkaudio/soundmode"])
-        await asyncio.sleep(1)
+    async def async_request_execute_payload(
+        self,
+        href: str,
+        required_keys: str | Iterable[str],
+        initial_sleep: float = 0.1,
+        retry_sleep: float = 0.2,
+        max_retries: int = 10,
+    ) -> dict[str, Any] | None:
+        """Request an execute href and poll until all required keys are present.
+
+        Returns the payload dict, or None if the required keys do not appear within
+        max_retries polling attempts.  Logs unexpected (non-Samsung) keys at debug
+        level so new properties can be discovered without crashing.
+        """
+        keys = (
+            (required_keys,)
+            if isinstance(required_keys, str)
+            else tuple(required_keys)
+        )
+
+        await self.update_execution_data([href])
+        await asyncio.sleep(initial_sleep)
         payload = await self.get_execute_status()
         retry = 0
-        while (
-                "x.com.samsung.networkaudio.supportedSoundmode" not in payload
-                and retry < 10
-        ):
-            await asyncio.sleep(1)
+        missing_keys = self.__missing_payload_keys(payload, keys)
+        while missing_keys and retry < max_retries:
+            await asyncio.sleep(retry_sleep)
             payload = await self.get_execute_status()
+            missing_keys = self.__missing_payload_keys(payload, keys)
             retry += 1
-        if retry == 10:
+        if missing_keys:
             log.error(
-                f"[{DOMAIN}] Error: _update_soundmode exceeded a retry counter of 10"
+                "[%s] async_request_execute_payload: required keys %s not found "
+                "in payload for href %r after %d retries; payload keys: %s",
+                DOMAIN,
+                missing_keys,
+                href,
+                max_retries,
+                sorted(payload),
             )
-            return
+            return None
+        unknown = [
+            k for k in payload
+            if not k.startswith("x.com.samsung.networkaudio.")
+        ]
+        if unknown:
+            log.debug(
+                "[%s] async_request_execute_payload: unexpected keys in payload "
+                "for href %r: %s",
+                DOMAIN,
+                href,
+                unknown,
+            )
+        return payload
 
+    @staticmethod
+    def __missing_payload_keys(
+        payload: dict[str, Any],
+        keys: Iterable[str],
+    ) -> list[str]:
+        return [key for key in keys if key not in payload]
+
+    async def _update_soundmode(self):
+        payload = await self.async_request_execute_payload(
+            "/sec/networkaudio/soundmode",
+            (
+                "x.com.samsung.networkaudio.supportedSoundmode",
+                "x.com.samsung.networkaudio.soundmode",
+            ),
+            initial_sleep=1,
+            retry_sleep=1,
+        )
+        if payload is None:
+            return
         self.__supported_soundmodes = payload[
             "x.com.samsung.networkaudio.supportedSoundmode"
         ]
         self.__active_soundmode = payload["x.com.samsung.networkaudio.soundmode"]
 
     async def _update_woofer(self):
-        await self.update_execution_data(["/sec/networkaudio/woofer"])
-        await asyncio.sleep(0.1)
-        payload = await self.get_execute_status()
-        retry = 0
-        while "x.com.samsung.networkaudio.woofer" not in payload and retry < 10:
-            await asyncio.sleep(0.2)
-            payload = await self.get_execute_status()
-            retry += 1
-        if retry == 10:
-            log.error(
-                f"[{DOMAIN}] Error: _update_woofer exceeded a retry counter of 10"
-            )
+        payload = await self.async_request_execute_payload(
+            "/sec/networkaudio/woofer",
+            (
+                "x.com.samsung.networkaudio.woofer",
+                "x.com.samsung.networkaudio.connection",
+            ),
+        )
+        if payload is None:
             return
         self.__woofer_level = payload["x.com.samsung.networkaudio.woofer"]
         self.__woofer_connection = payload["x.com.samsung.networkaudio.connection"]
 
     async def _update_equalizer(self):
-        await self.update_execution_data(["/sec/networkaudio/eq"])
-        await asyncio.sleep(0.1)
-        payload = await self.get_execute_status()
-        retry = 0
-        while "x.com.samsung.networkaudio.EQname" not in payload and retry < 10:
-            await asyncio.sleep(0.2)
-            payload = await self.get_execute_status()
-            retry += 1
-        if retry == 10:
-            log.error(
-                f"[{DOMAIN}] Error: _update_equalizer exceeded a retry counter of 10"
-            )
+        payload = await self.async_request_execute_payload(
+            "/sec/networkaudio/eq",
+            (
+                "x.com.samsung.networkaudio.EQname",
+                "x.com.samsung.networkaudio.supportedList",
+                "x.com.samsung.networkaudio.action",
+                "x.com.samsung.networkaudio.EQband",
+            ),
+        )
+        if payload is None:
             return
         self.__active_eq_preset = payload["x.com.samsung.networkaudio.EQname"]
         self.__supported_eq_presets = payload[
@@ -281,21 +333,16 @@ class SoundbarDevice:
         self.__eq_bands = payload["x.com.samsung.networkaudio.EQband"]
 
     async def _update_advanced_audio(self):
-        await self.update_execution_data(["/sec/networkaudio/advancedaudio"])
-        await asyncio.sleep(0.1)
-
-        payload = await self.get_execute_status()
-        retry = 0
-        while "x.com.samsung.networkaudio.nightmode" not in payload and retry < 10:
-            await asyncio.sleep(0.2)
-            payload = await self.get_execute_status()
-            retry += 1
-        if retry == 10:
-            log.error(
-                f"[{DOMAIN}] Error: _update_advanced_audio exceeded a retry counter of 10"
-            )
+        payload = await self.async_request_execute_payload(
+            "/sec/networkaudio/advancedaudio",
+            (
+                "x.com.samsung.networkaudio.nightmode",
+                "x.com.samsung.networkaudio.bassboost",
+                "x.com.samsung.networkaudio.voiceamplifier",
+            ),
+        )
+        if payload is None:
             return
-
         self.__night_mode = payload["x.com.samsung.networkaudio.nightmode"]
         self.__bass_mode = payload["x.com.samsung.networkaudio.bassboost"]
         self.__voice_amplifier = payload["x.com.samsung.networkaudio.voiceamplifier"]
@@ -638,12 +685,143 @@ class SoundbarDevice:
 
     async def set_custom_execution_data(self, href: str, property: str, value):
         argument = [href, {property: value}]
-        assert await self.__call_smartthings(
+        await self.__call_smartthings(
             lambda: self.device.command("main", "execute", "execute", argument),
             "set custom execution data",
         )
 
+    async def async_dump_execute_payload(
+        self,
+        hrefs: Iterable[str],
+        sleep_time: float = 0.3,
+        max_retries: int = 10,
+    ) -> dict[str, Any]:
+        """Request execute hrefs and return raw payloads for diagnostics."""
+        payloads: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        command_results: dict[str, Any] = {}
+        raw_statuses: dict[str, Any] = {}
+        raw_device_statuses: dict[str, Any] = {}
+
+        for href in hrefs:
+            try:
+                command_result = await self.__post_execute_command_raw([href])
+                command_results[href] = command_result
+                if command_result["status"] >= 400:
+                    errors[href] = self.__command_error_message(command_result)
+                    continue
+                payload: dict[str, Any] = {}
+                for _ in range(max_retries + 1):
+                    await asyncio.sleep(sleep_time)
+                    status_data = await self.get_execute_status_raw()
+                    raw_statuses[href] = status_data
+                    payload = self.__extract_execute_payload(status_data)
+                    if payload:
+                        break
+            except (ConfigEntryAuthFailed, ConfigEntryNotReady):
+                raise
+            except Exception as err:  # noqa: BLE001 - diagnostic dump should continue
+                log.exception(
+                    "[%s] Failed to dump execute payload for device %s href %s",
+                    DOMAIN,
+                    self.device_name,
+                    href,
+                )
+                errors[href] = str(err)
+                continue
+
+            if not payload:
+                device_status = await self.get_device_status_raw()
+                raw_device_statuses[href] = device_status
+                payload = self.__extract_execute_payload_from_device_status(
+                    device_status,
+                    href,
+                )
+                if not payload:
+                    errors[href] = (
+                        "execute status did not return payload "
+                        f"after {max_retries + 1} polling attempts"
+                    )
+                    continue
+
+            payloads[href] = payload
+            log.info(
+                "[%s] Execute payload for device %s href %s: %s",
+                DOMAIN,
+                self.device_name,
+                href,
+                payload,
+            )
+
+        self.__last_execute_payload_dump = {
+            "device_id": self.device_id,
+            "device_name": self.device_name,
+            "payloads": payloads,
+            "errors": errors,
+            "command_results": command_results,
+            "raw_statuses": raw_statuses,
+            "raw_device_statuses": raw_device_statuses,
+            "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+        return self.__last_execute_payload_dump
+
+    @property
+    def last_execute_payload_dump(self) -> dict[str, Any] | None:
+        return self.__last_execute_payload_dump
+
+    async def __post_execute_command_raw(
+        self,
+        arguments: list[Any],
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        url = f"https://api.smartthings.com/v1/devices/{self._device_id}/commands"
+        request_body = {
+            "commands": [
+                {
+                    "component": "main",
+                    "capability": "execute",
+                    "command": "execute",
+                    "arguments": arguments,
+                }
+            ]
+        }
+
+        resp = await self.__session.post(
+            url,
+            headers=await self.__auth_headers(force_refresh=force_refresh),
+            json=request_body,
+        )
+
+        if resp.status in _AUTH_ERROR_STATUSES and self.__auth_provider is not None:
+            resp.release()
+            return await self.__post_execute_command_raw(arguments, force_refresh=True)
+
+        if resp.status in _AUTH_ERROR_STATUSES:
+            resp.release()
+            raise ConfigEntryAuthFailed(
+                "SmartThings authorization is no longer valid"
+            )
+
+        if resp.status in _TRANSIENT_ERROR_STATUSES:
+            status = resp.status
+            body = await resp.text()
+            resp.release()
+            raise ConfigEntryNotReady(
+                f"SmartThings service returned transient status {status}: {body}"
+            )
+
+        response_body = await self.__response_body(resp)
+        return {
+            "status": resp.status,
+            "request": request_body,
+            "response": response_body,
+        }
+
     async def get_execute_status(self):
+        status_data = await self.get_execute_status_raw()
+        return self.__extract_execute_payload(status_data)
+
+    async def get_execute_status_raw(self) -> dict[str, Any]:
         url = (
             "https://api.smartthings.com/v1/devices/"
             f"{self._device_id}/components/main/capabilities/execute/status"
@@ -671,8 +849,84 @@ class SoundbarDevice:
             resp.raise_for_status()
         except ClientResponseError as err:
             self.__raise_for_http_status(err)
-        dict_stuff = await resp.json()
-        return dict_stuff["data"]["value"]["payload"]
+        status_data = await resp.json(content_type=None)
+        if isinstance(status_data, dict):
+            return status_data
+        return {"raw": status_data}
+
+    async def get_device_status_raw(self) -> dict[str, Any]:
+        url = f"https://api.smartthings.com/v1/devices/{self._device_id}/status"
+        resp = await self.__get_status_response(url)
+        status_data = await resp.json(content_type=None)
+        if isinstance(status_data, dict):
+            return status_data
+        return {"raw": status_data}
+
+    @staticmethod
+    def __extract_execute_payload(status_data: dict[str, Any]) -> dict[str, Any]:
+        data = SoundbarDevice.__maybe_json(status_data.get("data"))
+        value = (
+            SoundbarDevice.__maybe_json(data.get("value"))
+            if isinstance(data, dict)
+            else None
+        )
+
+        candidates = (
+            status_data.get("payload"),
+            data.get("payload") if isinstance(data, dict) else None,
+            value.get("payload") if isinstance(value, dict) else None,
+            value,
+            data,
+        )
+        for candidate in candidates:
+            candidate = SoundbarDevice.__maybe_json(candidate)
+            if not isinstance(candidate, dict):
+                continue
+            if "payload" in candidate:
+                nested_payload = SoundbarDevice.__maybe_json(candidate["payload"])
+                if isinstance(nested_payload, dict):
+                    return nested_payload
+            if any(key.startswith("x.com.samsung.networkaudio.") for key in candidate):
+                return candidate
+
+        return {}
+
+    @staticmethod
+    def __extract_execute_payload_from_device_status(
+        status_data: dict[str, Any],
+        href: str,
+    ) -> dict[str, Any]:
+        for candidate in SoundbarDevice.__walk_dicts(status_data):
+            data = SoundbarDevice.__maybe_json(candidate.get("data"))
+            if not isinstance(data, dict) or data.get("href") != href:
+                continue
+            payload = SoundbarDevice.__extract_execute_payload(candidate)
+            if payload:
+                return payload
+        return {}
+
+    @staticmethod
+    def __walk_dicts(value: Any):
+        if isinstance(value, dict):
+            yield value
+            for nested_value in value.values():
+                yield from SoundbarDevice.__walk_dicts(nested_value)
+        elif isinstance(value, list):
+            for nested_value in value:
+                yield from SoundbarDevice.__walk_dicts(nested_value)
+
+    @staticmethod
+    def __maybe_json(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+
+    @staticmethod
+    def __json_safe(value: Any) -> Any:
+        return json.loads(json.dumps(value, default=str))
 
     @staticmethod
     def __raise_for_http_status(err: ClientResponseError) -> None:
@@ -691,6 +945,36 @@ class SoundbarDevice:
     async def __get_execute_status_response(
         self, url: str, force_refresh: bool = False
     ):
+        return await self.__get_status_response(url, force_refresh=force_refresh)
+
+    async def __get_status_response(self, url: str, force_refresh: bool = False):
+        request_headers = await self.__auth_headers(force_refresh=force_refresh)
+        resp = await self.__session.get(url, headers=request_headers)
+
+        if resp.status in _AUTH_ERROR_STATUSES and self.__auth_provider is not None:
+            resp.release()
+            return await self.__get_status_response(url, force_refresh=True)
+
+        if resp.status in _AUTH_ERROR_STATUSES:
+            resp.release()
+            raise ConfigEntryAuthFailed(
+                "SmartThings authorization is no longer valid"
+            )
+
+        if resp.status in _TRANSIENT_ERROR_STATUSES:
+            status = resp.status
+            resp.release()
+            raise ConfigEntryNotReady(
+                f"SmartThings service returned transient status {status}"
+            )
+
+        try:
+            resp.raise_for_status()
+        except ClientResponseError as err:
+            self.__raise_for_http_status(err)
+        return resp
+
+    async def __auth_headers(self, force_refresh: bool = False) -> dict[str, str]:
         if self.__auth_provider is not None:
             api_key = await self.__auth_provider.async_get_access_token(
                 force_refresh=force_refresh
@@ -698,8 +982,28 @@ class SoundbarDevice:
         else:
             api_key = self.device._api.token
 
-        request_headers = {"Authorization": "Bearer " + api_key}
-        return await self.__session.get(url, headers=request_headers)
+        return {"Authorization": "Bearer " + api_key}
+
+    @staticmethod
+    async def __response_body(resp) -> Any:
+        body_text = await resp.text()
+        if not body_text:
+            return None
+        try:
+            return json.loads(body_text)
+        except json.JSONDecodeError:
+            return body_text
+
+    @staticmethod
+    def __command_error_message(command_result: dict[str, Any]) -> str:
+        response = command_result.get("response")
+        if isinstance(response, dict):
+            error = response.get("error")
+            if isinstance(error, dict):
+                code = error.get("code", "SmartThingsCommandError")
+                message = error.get("message", "Command failed")
+                return f"{code}: {message}"
+        return f"SmartThings command failed with HTTP {command_result['status']}"
 
     async def get_song_title_artwork(self, artist: str, title: str) -> str | None:
         """

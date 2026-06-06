@@ -163,6 +163,24 @@
                     "description": "See name."
                 }
             }
+        },
+        "dump_execute_payload": {
+            "name": "Dump execute payload",
+            "description": "Request SmartThings execute hrefs and return the raw payload for diagnostics.",
+            "fields": {
+                "device_id": {
+                    "name": "Device",
+                    "description": "Samsung Soundbar device. Required only when multiple soundbars are loaded."
+                },
+                "preset": {
+                    "name": "Preset",
+                    "description": "Known SmartThings execute href group to dump. Ignored when href is provided."
+                },
+                "href": {
+                    "name": "Href",
+                    "description": "Custom execute href, for example /sec/networkaudio/advancedaudio."
+                }
+            }
         }
     }
 }

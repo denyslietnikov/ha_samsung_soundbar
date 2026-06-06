@@ -23,6 +23,31 @@ CONF_ENTRY_SETTINGS_EQ_SELECTOR = "settings_eq"
 CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR = "settings_soundmode"
 CONF_ENTRY_SETTINGS_WOOFER_NUMBER = "settings_woofer"
 
+SERVICE_DUMP_EXECUTE_PAYLOAD = "dump_execute_payload"
+CONF_HREF = "href"
+CONF_PRESET = "preset"
+
+EXECUTE_PAYLOAD_HREFS = {
+    "advancedaudio": "/sec/networkaudio/advancedaudio",
+    "spacefitSound": "/sec/networkaudio/spacefitSound",
+    "activeVoiceAmplifier": "/sec/networkaudio/activeVoiceAmplifier",
+    "channelVolume": "/sec/networkaudio/channelVolume",
+    "surroundspeaker": "/sec/networkaudio/surroundspeaker",
+    "eq": "/sec/networkaudio/eq",
+    "soundmode": "/sec/networkaudio/soundmode",
+    "woofer": "/sec/networkaudio/woofer",
+    "sync": "/sec/networkaudio/sync",
+    "virtual": "/sec/networkaudio/virtual",
+    "moderateBass": "/sec/networkaudio/moderateBass",
+    "soundGrouping": "/sec/networkaudio/soundGrouping",
+    "privateRear": "/sec/networkaudio/privateRear",
+}
+
+EXECUTE_PAYLOAD_PRESETS = {
+    "all": tuple(EXECUTE_PAYLOAD_HREFS.values()),
+    **{preset: (href,) for preset, href in EXECUTE_PAYLOAD_HREFS.items()},
+}
+
 DEFAULT_NAME = DOMAIN
 
 BUTTON = BUTTON_DOMAIN

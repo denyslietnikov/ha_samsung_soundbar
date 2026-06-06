@@ -163,6 +163,24 @@
                 "description": "Siehe Name."
             }
         }
+    },
+    "dump_execute_payload":{
+        "name": "Execute Payload ausgeben",
+        "description": "SmartThings execute hrefs abfragen und die rohen Payload-Daten für Diagnose zurückgeben.",
+        "fields":{
+            "device_id":{
+                "name": "Gerät",
+                "description": "Samsung Soundbar Gerät. Nur erforderlich, wenn mehrere Soundbars geladen sind."
+            },
+            "preset":{
+                "name": "Preset",
+                "description": "Bekannte SmartThings execute href Gruppe. Wird ignoriert, wenn href gesetzt ist."
+            },
+            "href":{
+                "name": "Href",
+                "description": "Eigener execute href, zum Beispiel /sec/networkaudio/advancedaudio."
+            }
+        }
     }
   }
 }
