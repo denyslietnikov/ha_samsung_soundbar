@@ -8,8 +8,14 @@ from typing import Any
 
 import pysmartthings
 import voluptuous as vol
-from homeassistant.config_entries import SOURCE_REAUTH, ConfigFlowResult
+from homeassistant.config_entries import (
+    SOURCE_REAUTH,
+    ConfigEntry,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.config_entry_oauth2_flow import AbstractOAuth2FlowHandler
 from pysmartthings.exceptions import (
@@ -20,10 +26,16 @@ from pysmartthings.exceptions import (
 
 from .const import (
     CONF_ENTRY_DEVICE_ID,
+    CONF_ENTRY_MAX_VOLUME,
     CONF_ENTRY_DEVICE_NAME,
+    CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
+    CONF_ENTRY_SETTINGS_EQ_SELECTOR,
+    CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
+    CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
     DOMAIN,
     SMARTTHINGS_OAUTH_SCOPES,
 )
+from .entry_options import get_entry_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +51,12 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         super().__init__()
         self._devices: dict[str, str] = {}
         self._oauth_data: dict[str, Any] | None = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(_config_entry: ConfigEntry) -> OptionsFlow:
+        """Create the options flow."""
+        return SamsungSoundbarOptionsFlowHandler()
 
     @property
     def logger(self) -> logging.Logger:
@@ -184,4 +202,45 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             data=new_data,
             title=device_name,
             unique_id=device_id,
+        )
+
+
+class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
+    """Handle Samsung Soundbar options."""
+
+    async def async_step_init(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Manage Samsung Soundbar feature options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = get_entry_options(self.config_entry)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
+                        default=options[CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES],
+                    ): bool,
+                    vol.Required(
+                        CONF_ENTRY_SETTINGS_EQ_SELECTOR,
+                        default=options[CONF_ENTRY_SETTINGS_EQ_SELECTOR],
+                    ): bool,
+                    vol.Required(
+                        CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
+                        default=options[CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR],
+                    ): bool,
+                    vol.Required(
+                        CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
+                        default=options[CONF_ENTRY_SETTINGS_WOOFER_NUMBER],
+                    ): bool,
+                    vol.Required(
+                        CONF_ENTRY_MAX_VOLUME,
+                        default=options[CONF_ENTRY_MAX_VOLUME],
+                    ): vol.All(int, vol.Range(min=1, max=100)),
+                }
+            ),
         )

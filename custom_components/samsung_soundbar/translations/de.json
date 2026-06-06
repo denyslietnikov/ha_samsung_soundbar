@@ -49,6 +49,21 @@
             "reauth_successful": "SmartThings wurde erneut authentifiziert."
         }
     },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "settings_advanced_audio": "Advanced Audio Switches aktivieren (Nachtmodus, Bassmodus, Stimmenverstärker)",
+                    "settings_eq": "EQ Selector aktivieren",
+                    "settings_soundmode": "SoundMode Selector aktivieren",
+                    "settings_woofer": "Subwoofer Number Entity aktivieren",
+                    "device_volume": "Maximale Lautstärke"
+                },
+                "description": "Wähle, welche optionalen Samsung Soundbar Funktionen Home Assistant anzeigen soll. Nicht unterstützte Funktionen können auf manchen Modellen nicht verfügbar sein.",
+                "title": "Samsung Soundbar Optionen"
+            }
+        }
+    },
     "selector": {
         "soundmode": {
             "options": {

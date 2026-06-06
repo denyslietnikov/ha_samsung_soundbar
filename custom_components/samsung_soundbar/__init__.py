@@ -27,8 +27,8 @@ from .api_extension.smartthings_compat import ensure_device_entity
 from .auth import SmartThingsAuthProvider
 from .const import (
     CONF_ENTRY_DEVICE_ID,
-    CONF_ENTRY_DEVICE_NAME,
     CONF_ENTRY_MAX_VOLUME,
+    CONF_ENTRY_DEVICE_NAME,
     CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
     CONF_ENTRY_SETTINGS_EQ_SELECTOR,
     CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
@@ -41,6 +41,7 @@ from .const import (
     SERVICE_DUMP_EXECUTE_PAYLOAD,
     SERVICE_DUMP_STATUS_SUMMARY,
 )
+from .entry_options import get_entry_option
 from .models import DeviceConfig, SoundbarConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -142,18 +143,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             device=smart_things_device,
             session=session,
             auth_provider=auth_provider,
-            max_volume=entry.options.get(CONF_ENTRY_MAX_VOLUME, 100),
+            max_volume=get_entry_option(entry, CONF_ENTRY_MAX_VOLUME),
             device_name=entry.data.get(CONF_ENTRY_DEVICE_NAME),
-            enable_eq=entry.options.get(CONF_ENTRY_SETTINGS_EQ_SELECTOR, False),
-            enable_advanced_audio=entry.options.get(
-                CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES, False
+            enable_eq=get_entry_option(entry, CONF_ENTRY_SETTINGS_EQ_SELECTOR),
+            enable_advanced_audio=get_entry_option(
+                entry,
+                CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
             ),
-            enable_soundmode=entry.options.get(
-                CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR, False
+            enable_soundmode=get_entry_option(
+                entry,
+                CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
             ),
-            enable_woofer=entry.options.get(
-                CONF_ENTRY_SETTINGS_WOOFER_NUMBER, False
-            ),
+            enable_woofer=get_entry_option(entry, CONF_ENTRY_SETTINGS_WOOFER_NUMBER),
         )
 
         await soundbar_device.update()

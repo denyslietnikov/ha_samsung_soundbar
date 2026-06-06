@@ -9,6 +9,7 @@ from .const import (
     CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
     DOMAIN,
 )
+from .entry_options import get_entry_option
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,7 +28,12 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     for key in domain_data.devices:
         device_config: DeviceConfig = domain_data.devices[key]
         device = device_config.device
-        if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
+        if device.device_id == config_entry.data.get(
+            CONF_ENTRY_DEVICE_ID
+        ) and get_entry_option(
+            config_entry,
+            CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
+        ):
             entities.append(
                 SoundbarSwitchAdvancedAudio(
                     device,
