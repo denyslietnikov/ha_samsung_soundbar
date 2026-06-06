@@ -24,7 +24,9 @@ CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR = "settings_soundmode"
 CONF_ENTRY_SETTINGS_WOOFER_NUMBER = "settings_woofer"
 
 SERVICE_DUMP_EXECUTE_PAYLOAD = "dump_execute_payload"
+SERVICE_DUMP_STATUS_SUMMARY = "dump_status_summary"
 CONF_HREF = "href"
+CONF_INCLUDE_NULL = "include_null"
 CONF_PRESET = "preset"
 
 EXECUTE_PAYLOAD_HREFS = {

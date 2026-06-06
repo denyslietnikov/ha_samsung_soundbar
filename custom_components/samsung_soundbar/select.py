@@ -47,9 +47,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     )
                 )
 
-            entities.append(
-                InputSelectEntity(device, "input_preset", "mdi:video-input-hdmi")
-            )
+            if device.can_select_source:
+                entities.append(
+                    InputSelectEntity(device, "input_preset", "mdi:video-input-hdmi")
+                )
     async_add_entities(entities)
     return True
 

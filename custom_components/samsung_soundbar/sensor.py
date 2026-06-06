@@ -20,6 +20,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
         if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
             entities.append(VolumeSensor(device, "volume_level", "mdi:volume-high"))
+            if not device.can_select_source:
+                entities.append(
+                    InputSourceSensor(device, "input_preset", "mdi:video-input-hdmi")
+                )
     async_add_entities(entities)
     return True
 
@@ -48,3 +52,27 @@ class VolumeSensor(SensorEntity):
     def native_value(self) -> int | None:
         """Return the current soundbar volume."""
         return self.__device.device.status.volume
+
+
+class InputSourceSensor(SensorEntity):
+    def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):
+        self.__device = device
+        self._attr_unique_id = f"{device.device_id}_sensor_{append_unique_id}"
+        self.__base_icon = icon_string
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self.__device.device_id)},
+            name=self.__device.device_name,
+            manufacturer=self.__device.manufacturer,
+            model=self.__device.model,
+            sw_version=self.__device.firmware_version,
+        )
+        self._attr_name = "Input Preset"
+
+    @property
+    def icon(self) -> str | None:
+        return self.__base_icon
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the current soundbar input source."""
+        return self.__device.input_source

@@ -181,6 +181,20 @@
                 "description": "Eigener execute href, zum Beispiel /sec/networkaudio/advancedaudio."
             }
         }
+    },
+    "dump_status_summary":{
+        "name": "Status Zusammenfassung ausgeben",
+        "description": "Kompakte SmartThings Status Capability Zusammenfassung für Diagnose zurückgeben.",
+        "fields":{
+            "device_id":{
+                "name": "Gerät",
+                "description": "Samsung Soundbar Gerät. Nur erforderlich, wenn mehrere Soundbars geladen sind."
+            },
+            "include_null":{
+                "name": "Null-Werte einbeziehen",
+                "description": "Capabilities und Attribute mit null-Wert einbeziehen."
+            }
+        }
     }
   }
 }

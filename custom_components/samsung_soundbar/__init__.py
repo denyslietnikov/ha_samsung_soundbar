@@ -34,10 +34,12 @@ from .const import (
     CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
     CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
     CONF_HREF,
+    CONF_INCLUDE_NULL,
     CONF_PRESET,
     DOMAIN,
     EXECUTE_PAYLOAD_PRESETS,
     SERVICE_DUMP_EXECUTE_PAYLOAD,
+    SERVICE_DUMP_STATUS_SUMMARY,
 )
 from .models import DeviceConfig, SoundbarConfig
 
@@ -50,6 +52,13 @@ DUMP_EXECUTE_PAYLOAD_SCHEMA = vol.Schema(
         vol.Optional(CONF_HA_DEVICE_ID): cv.string,
         vol.Optional(CONF_HREF): cv.string,
         vol.Optional(CONF_PRESET, default="all"): vol.In(EXECUTE_PAYLOAD_PRESETS),
+    }
+)
+
+DUMP_STATUS_SUMMARY_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_HA_DEVICE_ID): cv.string,
+        vol.Optional(CONF_INCLUDE_NULL, default=False): cv.boolean,
     }
 )
 
@@ -171,6 +180,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
             domain_data.devices.pop(entry.data.get(CONF_ENTRY_DEVICE_ID), None)
             if not domain_data.devices:
                 hass.services.async_remove(DOMAIN, SERVICE_DUMP_EXECUTE_PAYLOAD)
+                hass.services.async_remove(DOMAIN, SERVICE_DUMP_STATUS_SUMMARY)
                 hass.data.pop(DOMAIN, None)
 
     return unload_ok
@@ -182,8 +192,27 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 def _async_register_services(hass: HomeAssistant) -> None:
     """Register integration-level services once."""
-    if hass.services.has_service(DOMAIN, SERVICE_DUMP_EXECUTE_PAYLOAD):
-        return
+    if not hass.services.has_service(DOMAIN, SERVICE_DUMP_EXECUTE_PAYLOAD):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_DUMP_EXECUTE_PAYLOAD,
+            _async_create_dump_execute_payload_service(hass),
+            schema=DUMP_EXECUTE_PAYLOAD_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_DUMP_STATUS_SUMMARY):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_DUMP_STATUS_SUMMARY,
+            _async_create_dump_status_summary_service(hass),
+            schema=DUMP_STATUS_SUMMARY_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
+
+def _async_create_dump_execute_payload_service(hass: HomeAssistant):
+    """Create the execute payload dump service handler."""
 
     async def async_dump_execute_payload(call: ServiceCall) -> ServiceResponse:
         domain_config: SoundbarConfig | None = hass.data.get(DOMAIN)
@@ -207,13 +236,27 @@ def _async_register_services(hass: HomeAssistant) -> None:
             **result,
         }
 
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_DUMP_EXECUTE_PAYLOAD,
-        async_dump_execute_payload,
-        schema=DUMP_EXECUTE_PAYLOAD_SCHEMA,
-        supports_response=SupportsResponse.OPTIONAL,
-    )
+    return async_dump_execute_payload
+
+
+def _async_create_dump_status_summary_service(hass: HomeAssistant):
+    """Create the status summary dump service handler."""
+
+    async def async_dump_status_summary(call: ServiceCall) -> ServiceResponse:
+        domain_config: SoundbarConfig | None = hass.data.get(DOMAIN)
+        if domain_config is None or not domain_config.devices:
+            raise HomeAssistantError("No Samsung Soundbar devices are loaded")
+
+        soundbar_device = _async_resolve_service_device(
+            hass,
+            domain_config,
+            call.data.get(CONF_HA_DEVICE_ID),
+        )
+        return await soundbar_device.async_dump_status_summary(
+            include_null=call.data[CONF_INCLUDE_NULL],
+        )
+
+    return async_dump_status_summary
 
 
 def _async_resolve_service_device(

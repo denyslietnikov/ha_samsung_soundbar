@@ -7,9 +7,14 @@ import re
 from typing import Any, TypeVar
 
 from aiohttp import ClientResponseError
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from pysmartthings.exceptions import (
     SmartThingsAuthenticationFailedError,
+    SmartThingsCommandError,
     SmartThingsConnectionError,
     SmartThingsForbiddenError,
 )
@@ -135,6 +140,10 @@ class SoundbarDevice:
         except SmartThingsConnectionError as err:
             raise ConfigEntryNotReady(
                 "SmartThings service is temporarily unavailable"
+            ) from err
+        except SmartThingsCommandError as err:
+            raise HomeAssistantError(
+                f"SmartThings rejected {description}: {err}"
             ) from err
 
     async def _update_media(self):
@@ -470,7 +479,7 @@ class SoundbarDevice:
     @property
     def input_source(self):
         if self.media_app_name in ("AirPlay", "Spotify"):
-            return "wifi"
+            return "WIFI"
         return self.device.status.input_source
 
     @property
@@ -481,7 +490,28 @@ class SoundbarDevice:
             sources.append(current)
         return sources
 
+    @property
+    def can_select_source(self) -> bool:
+        can_set_input_source = getattr(self.device, "can_set_input_source", None)
+        if can_set_input_source is not None:
+            return bool(can_set_input_source)
+
+        status = getattr(self.device, "status", None)
+        has_capability = getattr(status, "has_capability", None)
+        if callable(has_capability):
+            return bool(
+                has_capability("mediaInputSource")
+                or has_capability("samsungvd.mediaInputSource")
+            )
+
+        return bool(self.supported_input_sources)
+
     async def select_source(self, source: str):
+        if not self.can_select_source:
+            raise HomeAssistantError(
+                "Input source is read-only for this soundbar in the SmartThings API"
+            )
+
         await self.__call_smartthings(
             lambda: self.device.set_input_source(source, True),
             "select input source",
@@ -768,6 +798,80 @@ class SoundbarDevice:
     @property
     def last_execute_payload_dump(self) -> dict[str, Any] | None:
         return self.__last_execute_payload_dump
+
+    async def async_dump_status_summary(
+        self,
+        include_null: bool = False,
+    ) -> dict[str, Any]:
+        """Return a compact summary of SmartThings status capabilities."""
+        status_data = await self.get_device_status_raw()
+        components = status_data.get("components")
+        summary: dict[str, dict[str, dict[str, Any]]] = {}
+        non_null_paths: list[str] = []
+
+        if isinstance(components, dict):
+            for component, capabilities in components.items():
+                component_summary = self.__summarize_component_status(
+                    component,
+                    capabilities,
+                    include_null=include_null,
+                    non_null_paths=non_null_paths,
+                )
+                if component_summary:
+                    summary[component] = component_summary
+
+        return {
+            "device_id": self.device_id,
+            "device_name": self.device_name,
+            "include_null": include_null,
+            "components": summary,
+            "non_null_paths": non_null_paths,
+            "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+
+    @staticmethod
+    def __summarize_component_status(
+        component: str,
+        capabilities: Any,
+        include_null: bool,
+        non_null_paths: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        if not isinstance(capabilities, dict):
+            return {}
+
+        component_summary: dict[str, dict[str, Any]] = {}
+        for capability, attributes in capabilities.items():
+            if not isinstance(attributes, dict):
+                continue
+
+            attribute_summary: dict[str, Any] = {}
+            for attribute, status in attributes.items():
+                value = status.get("value") if isinstance(status, dict) else status
+                if value is None and not include_null:
+                    continue
+
+                attribute_summary[attribute] = SoundbarDevice.__summarize_status(
+                    status,
+                    value,
+                )
+                if value is not None:
+                    non_null_paths.append(f"{component}.{capability}.{attribute}")
+
+            if attribute_summary:
+                component_summary[capability] = attribute_summary
+
+        return component_summary
+
+    @staticmethod
+    def __summarize_status(status: Any, value: Any) -> dict[str, Any]:
+        if not isinstance(status, dict):
+            return {"value": value}
+
+        result = {"value": value}
+        for key in ("unit", "timestamp"):
+            if key in status:
+                result[key] = status[key]
+        return result
 
     async def __post_execute_command_raw(
         self,

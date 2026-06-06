@@ -26,7 +26,6 @@ SUPPORT_SMARTTHINGS_SOUNDBAR = (
     | MediaPlayerEntityFeature.VOLUME_STEP
     | MediaPlayerEntityFeature.VOLUME_MUTE
     | MediaPlayerEntityFeature.VOLUME_SET
-    | MediaPlayerEntityFeature.SELECT_SOURCE
     | MediaPlayerEntityFeature.TURN_OFF
     | MediaPlayerEntityFeature.TURN_ON
     | MediaPlayerEntityFeature.PLAY
@@ -138,7 +137,10 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
 
     @property
     def supported_features(self):
-        return SUPPORT_SMARTTHINGS_SOUNDBAR
+        features = SUPPORT_SMARTTHINGS_SOUNDBAR
+        if self.device.can_select_source:
+            features |= MediaPlayerEntityFeature.SELECT_SOURCE
+        return features
 
     @property
     def name(self):
@@ -185,6 +187,8 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
 
     @property
     def source_list(self):
+        if not self.device.can_select_source:
+            return None
         return self.device.supported_input_sources
 
     async def async_select_source(self, source):

@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from pysmartthings.exceptions import SmartThingsCommandError
+
+
+_INPUT_SOURCE_COMMAND_VALUE_MAP = {
+    "BT": "bluetooth",
+    "D.IN": "digital",
+    "TV ARC": "digital",
+    "WIFI": "wifi",
+}
+
 
 class SmartThingsStatusCompat:
     """Expose old DeviceEntity status helpers on top of current pysmartthings."""
@@ -54,6 +64,24 @@ class SmartThingsStatusCompat:
         status = self._status(capability, attribute)
         return default if status is None else status.value
 
+    def has_capability(self, capability: str, component: str = "main") -> bool:
+        """Return whether a capability exists in the last refreshed status."""
+        capabilities = self._components.get(component, {})
+        return any(self._key_name(key) == capability for key in capabilities)
+
+    def _first_value(
+        self,
+        capabilities: tuple[str, ...],
+        attribute: str,
+        default: Any = None,
+    ) -> Any:
+        """Return the first non-null value for an attribute across capabilities."""
+        for capability in capabilities:
+            value = self._value(capability, attribute)
+            if value is not None:
+                return value
+        return default
+
     @property
     def attributes(self) -> dict[str, Any]:
         """Return flattened attributes."""
@@ -103,12 +131,25 @@ class SmartThingsStatusCompat:
     @property
     def input_source(self) -> str | None:
         """Return active input source."""
-        return self._value("mediaInputSource", "inputSource")
+        return self._first_value(
+            (
+                "mediaInputSource",
+                "samsungvd.audioInputSource",
+            ),
+            "inputSource",
+        )
 
     @property
     def supported_input_sources(self) -> list[str]:
         """Return supported input sources."""
-        sources = self._value("mediaInputSource", "supportedInputSources", [])
+        sources = self._first_value(
+            (
+                "mediaInputSource",
+                "samsungvd.audioInputSource",
+            ),
+            "supportedInputSources",
+            [],
+        )
         return sources if isinstance(sources, list) else []
 
 
@@ -173,7 +214,39 @@ class SmartThingsDeviceCompat:
 
     async def set_input_source(self, source: str, wait: bool = False) -> bool:
         """Set input source."""
-        return await self.command("main", "mediaInputSource", "setInputSource", source)
+        command_source = _INPUT_SOURCE_COMMAND_VALUE_MAP.get(source, source)
+        last_error: SmartThingsCommandError | None = None
+
+        for capability in self._input_source_command_capabilities():
+            try:
+                return await self.command(
+                    "main",
+                    capability,
+                    "setInputSource",
+                    command_source,
+                )
+            except SmartThingsCommandError as err:
+                last_error = err
+
+        if last_error is not None:
+            raise last_error
+
+        return False
+
+    @property
+    def can_set_input_source(self) -> bool:
+        """Return whether SmartThings exposes a writable input source command."""
+        return bool(self._input_source_command_capabilities())
+
+    def _input_source_command_capabilities(self) -> tuple[str, ...]:
+        """Return writable input source capabilities to try in order."""
+        capabilities: list[str] = []
+        if self.status.has_capability("mediaInputSource"):
+            capabilities.append("mediaInputSource")
+        if self.status.has_capability("samsungvd.mediaInputSource"):
+            capabilities.append("samsungvd.mediaInputSource")
+
+        return tuple(dict.fromkeys(capabilities))
 
     async def play(self, wait: bool = False) -> bool:
         """Start playback."""
