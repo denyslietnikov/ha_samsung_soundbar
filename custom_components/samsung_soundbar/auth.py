@@ -8,7 +8,13 @@ from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, OAuth2TokenRequestError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    OAuth2TokenRequestError,
+    OAuth2TokenRequestReauthError,
+    OAuth2TokenRequestTransientError,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.config_entry_oauth2_flow import (
     ImplementationUnavailableError,
@@ -63,7 +69,15 @@ class SmartThingsAuthProvider:
                 await self._async_force_refresh_token()
             else:
                 await self.oauth_session.async_ensure_token_valid()
-        except (ClientError, OAuth2TokenRequestError) as err:
+        except OAuth2TokenRequestReauthError as err:
+            raise ConfigEntryAuthFailed(
+                "SmartThings OAuth refresh token is no longer valid"
+            ) from err
+        except (ClientError, OAuth2TokenRequestTransientError) as err:
+            raise ConfigEntryNotReady(
+                "SmartThings OAuth token refresh failed temporarily"
+            ) from err
+        except OAuth2TokenRequestError as err:
             raise ConfigEntryAuthFailed(
                 "SmartThings OAuth token refresh failed"
             ) from err

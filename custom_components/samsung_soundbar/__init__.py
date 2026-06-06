@@ -3,9 +3,13 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_TOKEN
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pysmartthings.exceptions import SmartThingsAuthenticationFailedError
+from pysmartthings.exceptions import (
+    SmartThingsAuthenticationFailedError,
+    SmartThingsConnectionError,
+    SmartThingsForbiddenError,
+)
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .api_extension.smartthings_compat import ensure_device_entity
@@ -24,7 +28,7 @@ from .models import DeviceConfig, SoundbarConfig
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "switch", "number", "select", "sensor"]
+PLATFORMS = ["media_player", "switch", "image", "number", "select", "sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -63,15 +67,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await api.get_device(device_id),
             )
 
-        except SmartThingsAuthenticationFailedError as err:
+        except (
+            SmartThingsAuthenticationFailedError,
+            SmartThingsForbiddenError,
+        ) as err:
             _LOGGER.error(
                 "[%s] SmartThings authentication failed. "
-                "The token may have expired, been revoked, or is no longer valid.",
+                "The token may have expired, been revoked, or lost access to "
+                "the configured soundbar.",
                 DOMAIN,
             )
 
             raise ConfigEntryAuthFailed(
-                "SmartThings token is no longer valid"
+                "SmartThings authorization is no longer valid"
+            ) from err
+
+        except SmartThingsConnectionError as err:
+            _LOGGER.warning(
+                "[%s] SmartThings service is temporarily unavailable while "
+                "loading device %s: %s",
+                DOMAIN,
+                device_id,
+                err,
+            )
+            raise ConfigEntryNotReady(
+                "SmartThings service is temporarily unavailable"
             ) from err
 
         except Exception as err:

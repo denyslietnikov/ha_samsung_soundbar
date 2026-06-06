@@ -1,15 +1,35 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 import datetime
 import logging
 import re
-from typing import Any
+from typing import Any, TypeVar
 
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from aiohttp import ClientResponseError
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from pysmartthings.exceptions import (
+    SmartThingsAuthenticationFailedError,
+    SmartThingsConnectionError,
+    SmartThingsForbiddenError,
+)
 
 from .const import SpeakerIdentifier, RearSpeakerMode
 from ..const import DOMAIN
 
 log = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+_AUTH_ERROR_STATUSES = {401, 403}
+_TRANSIENT_ERROR_STATUSES = {
+    408,
+    429,
+    500,
+    502,
+    503,
+    504,
+    520,
+    524,
+}
 
 
 class SoundbarDevice:
@@ -62,7 +82,10 @@ class SoundbarDevice:
         if self.__auth_provider is not None:
             await self.__auth_provider.async_get_access_token()
 
-        await self.device.status.refresh()
+        await self.__call_smartthings(
+            self.device.status.refresh,
+            "refresh device status",
+        )
 
         await self._update_media()
 
@@ -74,6 +97,43 @@ class SoundbarDevice:
             await self._update_woofer()
         if self.__enable_eq:
             await self._update_equalizer()
+
+    async def __call_smartthings(
+        self,
+        action: Callable[[], Awaitable[_T]],
+        description: str,
+    ) -> _T:
+        """Call SmartThings once, refresh auth on 401/403, then fail for reauth."""
+        try:
+            return await action()
+        except (
+            SmartThingsAuthenticationFailedError,
+            SmartThingsForbiddenError,
+        ) as err:
+            if self.__auth_provider is not None:
+                log.debug(
+                    "[%s] SmartThings auth failed during %s; forcing token refresh",
+                    DOMAIN,
+                    description,
+                )
+                await self.__auth_provider.async_get_access_token(force_refresh=True)
+                try:
+                    return await action()
+                except (
+                    SmartThingsAuthenticationFailedError,
+                    SmartThingsForbiddenError,
+                ) as retry_err:
+                    raise ConfigEntryAuthFailed(
+                        "SmartThings authorization is no longer valid"
+                    ) from retry_err
+
+            raise ConfigEntryAuthFailed(
+                "SmartThings authorization is no longer valid"
+            ) from err
+        except SmartThingsConnectionError as err:
+            raise ConfigEntryNotReady(
+                "SmartThings service is temporarily unavailable"
+            ) from err
 
     async def _update_media(self):
         audio_track_status = self.device.status._attributes.get("audioTrackData")
@@ -281,10 +341,16 @@ class SoundbarDevice:
             return "off"
 
     async def switch_off(self):
-        await self.device.switch_off(True)
+        await self.__call_smartthings(
+            lambda: self.device.switch_off(True),
+            "switch off",
+        )
 
     async def switch_on(self):
-        await self.device.switch_on(True)
+        await self.__call_smartthings(
+            lambda: self.device.switch_on(True),
+            "switch on",
+        )
 
     # ------------ VOLUME --------------
 
@@ -305,19 +371,34 @@ class SoundbarDevice:
         This respects the max volume and hovers between
         :param volume: between 0 and 1
         """
-        await self.device.set_volume(int(volume * self.__max_volume), True)
+        await self.__call_smartthings(
+            lambda: self.device.set_volume(int(volume * self.__max_volume), True),
+            "set volume",
+        )
 
     async def mute_volume(self, mute: bool):
         if mute:
-            await self.device.unmute(True)
+            await self.__call_smartthings(
+                lambda: self.device.unmute(True),
+                "unmute volume",
+            )
         else:
-            await self.device.mute(True)
+            await self.__call_smartthings(
+                lambda: self.device.mute(True),
+                "mute volume",
+            )
 
     async def volume_up(self):
-        await self.device.volume_up(True)
+        await self.__call_smartthings(
+            lambda: self.device.volume_up(True),
+            "volume up",
+        )
 
     async def volume_down(self):
-        await self.device.volume_down(True)
+        await self.__call_smartthings(
+            lambda: self.device.volume_down(True),
+            "volume down",
+        )
 
     # ------------ WOOFER LEVEL -------------
 
@@ -354,7 +435,10 @@ class SoundbarDevice:
         return sources
 
     async def select_source(self, source: str):
-        await self.device.set_input_source(source, True)
+        await self.__call_smartthings(
+            lambda: self.device.set_input_source(source, True),
+            "select input source",
+        )
 
     # ------------- SOUND MODE --------------
     @property
@@ -472,19 +556,34 @@ class SoundbarDevice:
             return attr.value
 
     async def media_play(self):
-        await self.device.play(True)
+        await self.__call_smartthings(
+            lambda: self.device.play(True),
+            "media play",
+        )
 
     async def media_pause(self):
-        await self.device.pause(True)
+        await self.__call_smartthings(
+            lambda: self.device.pause(True),
+            "media pause",
+        )
 
     async def media_stop(self):
-        await self.device.stop(True)
+        await self.__call_smartthings(
+            lambda: self.device.stop(True),
+            "media stop",
+        )
 
     async def media_next_track(self):
-        await self.device.command("main", "mediaPlayback", "fastForward")
+        await self.__call_smartthings(
+            lambda: self.device.command("main", "mediaPlayback", "fastForward"),
+            "media next track",
+        )
 
     async def media_previous_track(self):
-        await self.device.command("main", "mediaPlayback", "rewind")
+        await self.__call_smartthings(
+            lambda: self.device.command("main", "mediaPlayback", "rewind"),
+            "media previous track",
+        )
 
     @property
     def media_app_name(self):
@@ -532,27 +631,62 @@ class SoundbarDevice:
     # ------------ SUPPORT FUNCTIONS ------------
 
     async def update_execution_data(self, argument: str):
-        stuff = await self.device.command("main", "execute", "execute", argument)
-        return stuff
+        return await self.__call_smartthings(
+            lambda: self.device.command("main", "execute", "execute", argument),
+            "update execution data",
+        )
 
     async def set_custom_execution_data(self, href: str, property: str, value):
         argument = [href, {property: value}]
-        assert await self.device.command("main", "execute", "execute", argument)
+        assert await self.__call_smartthings(
+            lambda: self.device.command("main", "execute", "execute", argument),
+            "set custom execution data",
+        )
 
     async def get_execute_status(self):
-        url = f"https://api.smartthings.com/v1/devices/{self._device_id}/components/main/capabilities/execute/status"
+        url = (
+            "https://api.smartthings.com/v1/devices/"
+            f"{self._device_id}/components/main/capabilities/execute/status"
+        )
         resp = await self.__get_execute_status_response(url)
 
-        if resp.status == 401 and self.__auth_provider is not None:
+        if resp.status in _AUTH_ERROR_STATUSES and self.__auth_provider is not None:
             resp.release()
             resp = await self.__get_execute_status_response(url, force_refresh=True)
 
-        if resp.status == 401:
-            raise ConfigEntryAuthFailed("SmartThings OAuth token is invalid")
+        if resp.status in _AUTH_ERROR_STATUSES:
+            resp.release()
+            raise ConfigEntryAuthFailed(
+                "SmartThings authorization is no longer valid"
+            )
 
-        resp.raise_for_status()
+        if resp.status in _TRANSIENT_ERROR_STATUSES:
+            status = resp.status
+            resp.release()
+            raise ConfigEntryNotReady(
+                f"SmartThings service returned transient status {status}"
+            )
+
+        try:
+            resp.raise_for_status()
+        except ClientResponseError as err:
+            self.__raise_for_http_status(err)
         dict_stuff = await resp.json()
         return dict_stuff["data"]["value"]["payload"]
+
+    @staticmethod
+    def __raise_for_http_status(err: ClientResponseError) -> None:
+        """Map SmartThings HTTP errors to Home Assistant config-entry errors."""
+        status = err.status
+        if status in _AUTH_ERROR_STATUSES:
+            raise ConfigEntryAuthFailed(
+                "SmartThings authorization is no longer valid"
+            ) from err
+        if status in _TRANSIENT_ERROR_STATUSES:
+            raise ConfigEntryNotReady(
+                f"SmartThings service returned transient status {err.status}"
+            ) from err
+        raise err
 
     async def __get_execute_status_response(
         self, url: str, force_refresh: bool = False

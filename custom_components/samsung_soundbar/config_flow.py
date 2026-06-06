@@ -70,10 +70,12 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         except (
             SmartThingsAuthenticationFailedError,
             SmartThingsForbiddenError,
-            SmartThingsConnectionError,
         ) as exc:
             _LOGGER.error("SmartThings OAuth validation failed: %s", exc)
             return self.async_abort(reason="invalid_auth")
+        except SmartThingsConnectionError as exc:
+            _LOGGER.warning("SmartThings OAuth validation could not connect: %s", exc)
+            return self.async_abort(reason="cannot_connect")
 
         self._devices = {
             device.device_id: getattr(device, "label", None) or device.device_id
@@ -159,13 +161,18 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         entry = self._get_reauth_entry()
         device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
 
+        if device_id is None:
+            return self.async_abort(reason="reauth_device_unavailable")
+
         if device_id not in self._devices:
             return self.async_abort(reason="reauth_device_unavailable")
 
         await self.async_set_unique_id(device_id)
         self._abort_if_unique_id_mismatch(reason="reauth_account_mismatch")
 
-        device_name = entry.data.get(CONF_ENTRY_DEVICE_NAME) or self._devices[device_id]
+        device_name = entry.data.get(CONF_ENTRY_DEVICE_NAME) or self._devices[
+            device_id
+        ]
         new_data = {
             **data,
             CONF_ENTRY_DEVICE_ID: device_id,

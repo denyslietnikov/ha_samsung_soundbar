@@ -21,7 +21,7 @@
                 "title": "Select soundbar"
             },
             "reauth_confirm": {
-                "description": "Reconnect SmartThings with OAuth. The legacy Personal Access Token will be replaced by an automatically refreshed OAuth token.",
+                "description": "Reconnect SmartThings with OAuth. This is required when the refresh token was revoked, expired, or the legacy Personal Access Token entry needs to be replaced.",
                 "title": "Reauthenticate SmartThings"
             },
             "reconfigure_confirm": {
@@ -37,13 +37,16 @@
             }
         },
         "abort": {
+            "cannot_connect": "Could not connect to SmartThings. Try again later.",
             "invalid_auth": "SmartThings authorization failed.",
             "missing_configuration": "SmartThings application credentials are not configured.",
             "missing_credentials": "SmartThings application credentials are missing.",
             "missing_scopes": "SmartThings did not grant all required scopes.",
             "no_devices": "No SmartThings devices were returned for this account.",
+            "oauth_error": "SmartThings OAuth flow did not return valid data.",
             "reauth_account_mismatch": "The selected SmartThings account does not match this soundbar entry.",
-            "reauth_device_unavailable": "This SmartThings account cannot access the configured soundbar."
+            "reauth_device_unavailable": "This SmartThings account cannot access the configured soundbar.",
+            "reauth_successful": "SmartThings has been reauthenticated."
         }
     },
     "selector": {
