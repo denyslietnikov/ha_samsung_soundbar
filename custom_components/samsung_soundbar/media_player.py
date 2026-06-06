@@ -226,7 +226,15 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
 
     @property
     def media_image_url(self) -> str | None:
-        return self.device.media_coverart_url
+        return self.device.media_coverart_url or None
+
+    @property
+    def media_image_hash(self) -> str | None:
+        return self.device.media_coverart_hash
+
+    @property
+    def media_image_remotely_accessible(self) -> bool | None:
+        return self.device.media_coverart_url is not None
 
     @property
     def app_name(self) -> str | None:

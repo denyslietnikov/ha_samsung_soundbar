@@ -1,9 +1,8 @@
 import asyncio
 import datetime
-import json
 import logging
+import re
 from typing import Any
-from urllib.parse import quote
 
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
@@ -53,9 +52,9 @@ class SoundbarDevice:
 
         self.__media_title = ""
         self.__media_artist = ""
-        self.__media_cover_url = ""
+        self.__media_cover_url: str | None = None
         self.__media_cover_url_update_time: datetime.datetime | None = None
-        self.__old_media_title = ""
+        self.__old_media_key = ""
 
         self.__max_volume = max_volume
 
@@ -77,19 +76,88 @@ class SoundbarDevice:
             await self._update_equalizer()
 
     async def _update_media(self):
-        if "audioTrackData" in self.device.status._attributes:
-            self.__media_artist = self.device.status._attributes["audioTrackData"].value[
-                "artist"
-            ]
-            self.__media_title = self.device.status._attributes["audioTrackData"].value[
-                "title"
-            ]
-            if self.__media_title != self.__old_media_title:
-                self.__old_media_title = self.__media_title
-                self.__media_cover_url_update_time = datetime.datetime.now()
-                self.__media_cover_url = await self.get_song_title_artwork(
-                    self.__media_artist, self.__media_title
-                )
+        audio_track_status = self.device.status._attributes.get("audioTrackData")
+        audio_track_data = getattr(audio_track_status, "value", None)
+        if not isinstance(audio_track_data, dict):
+            self.__clear_media_metadata()
+            return
+
+        artist = self.__clean_media_value(audio_track_data.get("artist"))
+        title = self.__clean_media_value(audio_track_data.get("title"))
+        media_key = f"{artist}\0{title}"
+
+        self.__media_artist = artist
+        self.__media_title = title
+
+        if not artist and not title:
+            self.__clear_media_artwork(media_key)
+            return
+
+        if media_key == self.__old_media_key:
+            return
+
+        self.__old_media_key = media_key
+        self.__media_cover_url_update_time = datetime.datetime.now()
+        self.__media_cover_url = self.__extract_media_artwork_url(audio_track_data)
+        if self.__media_cover_url is None:
+            self.__media_cover_url = await self.get_song_title_artwork(artist, title)
+
+    def __clear_media_metadata(self) -> None:
+        self.__media_artist = ""
+        self.__media_title = ""
+        self.__clear_media_artwork("")
+
+    def __clear_media_artwork(self, media_key: str) -> None:
+        if self.__old_media_key == media_key and self.__media_cover_url is None:
+            return
+        self.__old_media_key = media_key
+        self.__media_cover_url = None
+        self.__media_cover_url_update_time = datetime.datetime.now()
+
+    @staticmethod
+    def __clean_media_value(value: Any) -> str:
+        return str(value).strip() if value is not None else ""
+
+    def __extract_media_artwork_url(
+        self, audio_track_data: dict[str, Any]
+    ) -> str | None:
+        for key in (
+            "albumArtUrl",
+            "albumArtURI",
+            "albumArtUri",
+            "artworkUrl",
+            "imageUrl",
+            "thumbnailUrl",
+            "coverArtUrl",
+            "coverUrl",
+        ):
+            artwork_url = self.__normalize_artwork_url(audio_track_data.get(key))
+            if artwork_url is not None:
+                return artwork_url
+        return None
+
+    @staticmethod
+    def __normalize_artwork_url(url: Any) -> str | None:
+        if not isinstance(url, str):
+            return None
+
+        normalized = url.strip()
+        if not normalized:
+            return None
+        if normalized.startswith("//"):
+            normalized = f"https:{normalized}"
+        elif normalized.startswith("http://"):
+            normalized = f"https://{normalized.removeprefix('http://')}"
+
+        if not normalized.startswith("https://"):
+            return None
+
+        return re.sub(
+            r"/(\d+x\d+bb)\.(jpg|jpeg|png|webp)(\?.*)?$",
+            r"/600x600bb.\2\3",
+            normalized,
+            flags=re.IGNORECASE,
+        )
 
     async def _update_soundmode(self):
         await self.update_execution_data(["/sec/networkaudio/soundmode"])
@@ -373,8 +441,19 @@ class SoundbarDevice:
         return self.__media_artist
 
     @property
-    def media_coverart_url(self):
+    def media_coverart_url(self) -> str | None:
         return self.__media_cover_url
+
+    @property
+    def media_coverart_hash(self) -> str | None:
+        if self.__media_cover_url is None:
+            return None
+        if self.__media_cover_url_update_time is None:
+            return self.__media_cover_url
+        return (
+            f"{self.__media_cover_url}:"
+            f"{self.__media_cover_url_update_time.timestamp()}"
+        )
 
     @property
     def media_duration(self) -> int | None:
@@ -411,7 +490,7 @@ class SoundbarDevice:
         return None
 
     @property
-    def media_coverart_updated(self) -> datetime.datetime:
+    def media_coverart_updated(self) -> datetime.datetime | None:
         return self.__media_cover_url_update_time
 
     # ------------ Speaker Level ----------------
@@ -484,7 +563,7 @@ class SoundbarDevice:
         request_headers = {"Authorization": "Bearer " + api_key}
         return await self.__session.get(url, headers=request_headers)
 
-    async def get_song_title_artwork(self, artist: str, title: str) -> str:
+    async def get_song_title_artwork(self, artist: str, title: str) -> str | None:
         """
         This function loads a Music Art Cover from iTunes based on
         the title and the artist
@@ -492,15 +571,36 @@ class SoundbarDevice:
         :param title: string
         :return: url as string
         """
-        query_term = f"{artist} {title}"
-        url = "https://itunes.apple.com/search?term=%s&media=music&entity=%s" % (
-            quote(query_term),
-            "musicTrack",
-        )
-        resp = await self.__session.get(url)
-        resp_dict = json.loads(await resp.text())
-        if len(resp_dict["results"]) != 0:
-            return resp_dict["results"][0]["artworkUrl100"]
+        query_term = " ".join(value for value in (artist, title) if value)
+        if not query_term:
+            return None
+
+        try:
+            async with self.__session.get(
+                "https://itunes.apple.com/search",
+                params={
+                    "term": query_term,
+                    "media": "music",
+                    "entity": "musicTrack",
+                    "limit": 1,
+                },
+            ) as resp:
+                if resp.status != 200:
+                    log.debug(
+                        "[%s] iTunes artwork lookup failed with status %s",
+                        DOMAIN,
+                        resp.status,
+                    )
+                    return None
+                resp_dict = await resp.json(content_type=None)
+        except Exception as exc:  # noqa: BLE001 - artwork lookup must not break updates
+            log.debug("[%s] iTunes artwork lookup failed: %s", DOMAIN, exc)
+            return None
+
+        results = resp_dict.get("results", [])
+        if not results:
+            return None
+        return self.__normalize_artwork_url(results[0].get("artworkUrl100"))
 
     @property
     def retrieve_data(self):

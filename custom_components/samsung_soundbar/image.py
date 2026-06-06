@@ -49,7 +49,7 @@ class SoundbarImageEntity(ImageEntity):
     @property
     def image_url(self) -> str | None | UndefinedType:
         """Return URL of image."""
-        return self.__device.media_coverart_url
+        return self.__device.media_coverart_url or None
 
     @property
     def image_last_updated(self) -> datetime | None:
