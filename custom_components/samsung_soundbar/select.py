@@ -1,10 +1,5 @@
 import logging
 
-from homeassistant.components.number import (
-    NumberEntity,
-    NumberEntityDescription,
-    NumberMode,
-)
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.helpers.entity import DeviceInfo
 
@@ -18,6 +13,20 @@ from .const import (
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
+
+SELECT_ENTITY_NAMES = {
+    "eq_preset": "EQ Preset",
+    "sound_mode_preset": "Sound Mode",
+    "input_preset": "Input Preset",
+}
+
+
+def _select_options(options: list[str] | None, current: str | None) -> list[str]:
+    """Return select options with the current value included."""
+    values = list(options or [])
+    if current and current not in values:
+        values.append(current)
+    return values
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
@@ -52,7 +61,7 @@ class EqPresetSelectEntity(SelectEntity):
         append_unique_id: str,
         icon_string: str,
     ):
-        self.entity_id = f"number.{device.device_name}_{append_unique_id}"
+        self.entity_id = f"select.{device.device_name}_{append_unique_id}"
         self.entity_description = SelectEntityDescription(
             key=append_unique_id,
         )
@@ -68,13 +77,18 @@ class EqPresetSelectEntity(SelectEntity):
         )
         self.__append_unique_id = append_unique_id
 
-        self._attr_options = self.__device.supported_equalizer_presets
-
     # ---------- GENERAL ---------------
 
     @property
     def name(self):
-        return self.__append_unique_id
+        return SELECT_ENTITY_NAMES.get(self.__append_unique_id, self.__append_unique_id)
+
+    @property
+    def options(self) -> list[str]:
+        return _select_options(
+            self.__device.supported_equalizer_presets,
+            self.current_option,
+        )
 
     @property
     def icon(self) -> str | None:
@@ -100,7 +114,7 @@ class SoundModeSelectEntity(SelectEntity):
         append_unique_id: str,
         icon_string: str,
     ):
-        self.entity_id = f"number.{device.device_name}_{append_unique_id}"
+        self.entity_id = f"select.{device.device_name}_{append_unique_id}"
         self.entity_description = SelectEntityDescription(
             key=append_unique_id,
         )
@@ -116,13 +130,18 @@ class SoundModeSelectEntity(SelectEntity):
         )
         self.__append_unique_id = append_unique_id
 
-        self._attr_options = self.__device.supported_soundmodes
-
     # ---------- GENERAL ---------------
 
     @property
     def name(self):
-        return self.__append_unique_id
+        return SELECT_ENTITY_NAMES.get(self.__append_unique_id, self.__append_unique_id)
+
+    @property
+    def options(self) -> list[str]:
+        return _select_options(
+            self.__device.supported_soundmodes,
+            self.current_option,
+        )
 
     @property
     def icon(self) -> str | None:
@@ -148,7 +167,7 @@ class InputSelectEntity(SelectEntity):
         append_unique_id: str,
         icon_string: str,
     ):
-        self.entity_id = f"number.{device.device_name}_{append_unique_id}"
+        self.entity_id = f"select.{device.device_name}_{append_unique_id}"
         self.entity_description = SelectEntityDescription(
             key=append_unique_id,
         )
@@ -164,13 +183,18 @@ class InputSelectEntity(SelectEntity):
         )
         self.__append_unique_id = append_unique_id
 
-        self._attr_options = self.__device.supported_input_sources
-
     # ---------- GENERAL ---------------
 
     @property
     def name(self):
-        return self.__append_unique_id
+        return SELECT_ENTITY_NAMES.get(self.__append_unique_id, self.__append_unique_id)
+
+    @property
+    def options(self) -> list[str]:
+        return _select_options(
+            self.__device.supported_input_sources,
+            self.current_option,
+        )
 
     @property
     def icon(self) -> str | None:

@@ -347,7 +347,11 @@ class SoundbarDevice:
 
     @property
     def supported_input_sources(self):
-        return self.device.status.supported_input_sources
+        sources = list(self.device.status.supported_input_sources or [])
+        current = self.input_source
+        if current and current not in sources:
+            sources.append(current)
+        return sources
 
     async def select_source(self, source: str):
         await self.device.set_input_source(source, True)

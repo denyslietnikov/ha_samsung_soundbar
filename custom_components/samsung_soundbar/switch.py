@@ -13,6 +13,12 @@ from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
 
+SWITCH_ENTITY_NAMES = {
+    "bassmode": "Bassmode",
+    "nightmode": "Nightmode",
+    "voice_amplifier": "Voice Amplifier",
+}
+
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     domain_data = hass.data[DOMAIN]
@@ -22,37 +28,36 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         device_config: DeviceConfig = domain_data.devices[key]
         device = device_config.device
         if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
-
-                entities.append(
-                    SoundbarSwitchAdvancedAudio(
-                        device,
-                        "nightmode",
-                        lambda: device.night_mode,
-                        device.set_night_mode,
-                        device.set_night_mode,
-                        "mdi:weather-night",
-                    )
+            entities.append(
+                SoundbarSwitchAdvancedAudio(
+                    device,
+                    "nightmode",
+                    lambda: device.night_mode,
+                    device.set_night_mode,
+                    device.set_night_mode,
+                    "mdi:weather-night",
                 )
-                entities.append(
-                    SoundbarSwitchAdvancedAudio(
-                        device,
-                        "bassmode",
-                        lambda: device.bass_mode,
-                        device.set_bass_mode,
-                        device.set_bass_mode,
-                        "mdi:speaker-wireless",
-                    )
+            )
+            entities.append(
+                SoundbarSwitchAdvancedAudio(
+                    device,
+                    "bassmode",
+                    lambda: device.bass_mode,
+                    device.set_bass_mode,
+                    device.set_bass_mode,
+                    "mdi:speaker-wireless",
                 )
-                entities.append(
-                    SoundbarSwitchAdvancedAudio(
-                        device,
-                        "voice_amplifier",
-                        lambda: device.voice_amplifier,
-                        device.set_voice_amplifier,
-                        device.set_voice_amplifier,
-                        "mdi:account-voice",
-                    )
+            )
+            entities.append(
+                SoundbarSwitchAdvancedAudio(
+                    device,
+                    "voice_amplifier",
+                    lambda: device.voice_amplifier,
+                    device.set_voice_amplifier,
+                    device.set_voice_amplifier,
+                    "mdi:account-voice",
                 )
+            )
     async_add_entities(entities)
     return True
 
@@ -70,7 +75,8 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
         self.entity_id = f"switch.{device.device_name}_{append_unique_id}"
 
         self.__device = device
-        self._name = f"{self.__device.device_name} {append_unique_id}"
+        display_name = SWITCH_ENTITY_NAMES.get(append_unique_id, append_unique_id)
+        self._name = f"{self.__device.device_name} {display_name}"
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
         self.__base_icon = icon_string
         self._attr_device_info = DeviceInfo(

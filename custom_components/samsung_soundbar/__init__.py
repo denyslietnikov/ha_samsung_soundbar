@@ -24,7 +24,7 @@ from .models import DeviceConfig, SoundbarConfig
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "switch", "image", "number", "select", "sensor"]
+PLATFORMS = ["media_player", "switch", "number", "select", "sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

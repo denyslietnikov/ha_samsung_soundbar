@@ -5,6 +5,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.const import PERCENTAGE
 from homeassistant.helpers.entity import DeviceInfo
 
 from .api_extension.SoundbarDevice import SoundbarDevice
@@ -41,16 +42,16 @@ class VolumeSensor(SensorEntity):
             sw_version=self.__device.firmware_version,
         )
         self.__append_unique_id = append_unique_id
-
-        _attr_device_class = SensorDeviceClass.VOLUME
+        self._attr_name = "Volume Level"
+        self._attr_device_class = SensorDeviceClass.VOLUME
+        self._attr_native_unit_of_measurement = PERCENTAGE
+        self._attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def icon(self) -> str | None:
         return self.__base_icon
 
-    def update(self) -> None:
-        """Fetch new state data for the sensor.
-
-        This is the only method that should fetch new data for Home Assistant.
-        """
-        self._attr_native_value = self.__device.device.status.volume
+    @property
+    def native_value(self) -> int | None:
+        """Return the current soundbar volume."""
+        return self.__device.device.status.volume
