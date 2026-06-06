@@ -1,25 +1,28 @@
 {
+    "application_credentials": {
+        "description": "Create a SmartThings OAuth-In App with the SmartThings CLI. Add this redirect URI exactly: `{redirect_uri}`. Use scopes `r:devices:*`, `x:devices:*`, and `r:locations:*`, then enter the generated client ID and client secret here. [SmartThings CLI documentation]({console_url})"
+    },
     "config": {
         "step": {
             "user": {
                 "data": {
-                    "api_key": "SmartThings API Token",
                     "device_id": "Device ID",
-                    "device_name": "Device Name",
-                    "device_volume": "Max Volume (int)"
+                    "device_name": "Device Name"
                 },
-                "description": "Please enter your credentials.",
-                "title": "Authentication"
+                "description": "Connect your Samsung account with SmartThings OAuth. Add SmartThings application credentials first if Home Assistant asks for them.",
+                "title": "Connect SmartThings"
             },
             "device": {
                 "data": {
-                    "settings_advanced_audio": "Enable 'Advanced Audio switches' capabilities (NightMode, BassMode, VoiceEnhancer)",
-                    "settings_eq": "Enable 'EQ selector' capabilities",
-                    "settings_soundmode": "Enable 'Soundmode selector' capabilities",
-                    "settings_woofer": "Enable 'Woofer number' capability"
+                    "device_id": "Soundbar",
+                    "device_name": "Device Name"
                 },
-                "description": "Some soundbars have a different featureset than others. Please the features supported by your soundbar (visible in the SmartThings App).",
-                "title": "Device Settings"
+                "description": "Select the SmartThings soundbar to add to Home Assistant.",
+                "title": "Select soundbar"
+            },
+            "reauth_confirm": {
+                "description": "Reconnect SmartThings with OAuth. The legacy Personal Access Token will be replaced by an automatically refreshed OAuth token.",
+                "title": "Reauthenticate SmartThings"
             },
             "reconfigure_confirm": {
                 "data": {
@@ -32,6 +35,15 @@
                 "description": "Some soundbars have a different featureset than others. Please the features supported by your soundbar (visible in the SmartThings App).",
                 "title": "Device Settings"
             }
+        },
+        "abort": {
+            "invalid_auth": "SmartThings authorization failed.",
+            "missing_configuration": "SmartThings application credentials are not configured.",
+            "missing_credentials": "SmartThings application credentials are missing.",
+            "missing_scopes": "SmartThings did not grant all required scopes.",
+            "no_devices": "No SmartThings devices were returned for this account.",
+            "reauth_account_mismatch": "The selected SmartThings account does not match this soundbar entry.",
+            "reauth_device_unavailable": "This SmartThings account cannot access the configured soundbar."
         }
     },
     "selector": {

@@ -1,14 +1,15 @@
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ACCESS_TOKEN
+from homeassistant.const import CONF_TOKEN
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pysmartthings import SmartThings
 from pysmartthings.exceptions import SmartThingsAuthenticationFailedError
 
 from .api_extension.SoundbarDevice import SoundbarDevice
+from .api_extension.smartthings_compat import ensure_device_entity
+from .auth import SmartThingsAuthProvider
 from .const import (
     CONF_ENTRY_DEVICE_ID,
     CONF_ENTRY_DEVICE_NAME,
@@ -31,16 +32,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.info("[%s] Setting up entry", DOMAIN)
 
-    token = entry.data[CONF_ACCESS_TOKEN]
+    if CONF_TOKEN not in entry.data:
+        raise ConfigEntryAuthFailed(
+            "Legacy SmartThings PAT entries must be reauthenticated with OAuth"
+        )
 
-    api = SmartThings(session=async_get_clientsession(hass))
-    api.authenticate(token)
+    auth_provider = await SmartThingsAuthProvider.async_create(hass, entry)
+    api = auth_provider.api
 
     if DOMAIN not in hass.data:
-        hass.data[DOMAIN] = SoundbarConfig(api, {})
+        hass.data[DOMAIN] = SoundbarConfig(api, {}, auth_provider)
 
     domain_config: SoundbarConfig = hass.data[DOMAIN]
     domain_config.api = api
+    domain_config.auth_provider = auth_provider
 
     device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
 
@@ -53,7 +58,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 device_id,
             )
 
-            smart_things_device = await api.get_device(device_id)
+            smart_things_device = ensure_device_entity(
+                api,
+                await api.get_device(device_id),
+            )
 
         except SmartThingsAuthenticationFailedError as err:
             _LOGGER.error(
@@ -78,8 +86,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         soundbar_device = SoundbarDevice(
             device=smart_things_device,
-            smartthings=api,
             session=session,
+            auth_provider=auth_provider,
             max_volume=entry.options.get(CONF_ENTRY_MAX_VOLUME, 100),
             device_name=entry.data.get(CONF_ENTRY_DEVICE_NAME),
             enable_eq=entry.options.get(CONF_ENTRY_SETTINGS_EQ_SELECTOR, False),

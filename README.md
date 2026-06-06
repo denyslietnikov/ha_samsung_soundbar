@@ -10,13 +10,36 @@ This fork mainly focuses on:
 
 - Home Assistant 2026.x compatibility
 - Fixing deprecated API usage
-- Restoring OAuth/config flow support
+- Restoring OAuth/config flow support without SmartThings PATs
 - Improving long-term maintainability
 - Preserving compatibility with modern pysmartthings versions
+
+## OAuth Beta Setup
+
+Beta `0.7.0b3` targets Home Assistant `2026.1.0` or newer.
+
+This fork uses SmartThings OAuth instead of a Personal Access Token. Before adding the integration, create a SmartThings OAuth-In application and add its `client_id` and `client_secret` in Home Assistant under Application Credentials for the `Samsung Soundbar` integration.
+
+Use these scopes for the first beta:
+
+- `r:devices:*`
+- `x:devices:*`
+- `r:locations:*`
+
+When SmartThings asks for a redirect URI, add this exact value, with no trailing slash:
+
+```text
+https://my.home-assistant.io/redirect/oauth
+```
+
+If SmartThings shows `'redirect_uri' could not be validated`, the OAuth-In App does not contain the exact redirect URI above. Update or recreate the SmartThings OAuth-In App, then retry the Home Assistant flow.
+
+After credentials are saved, add the integration from the Home Assistant UI, sign in with Samsung, and select the soundbar device.
 
 ## Features
 
 - UI-based setup through Home Assistant
+- SmartThings OAuth with automatic access-token refresh
 - Media player controls
 - Sound mode selection
 - Equalizer & subwoofer controls

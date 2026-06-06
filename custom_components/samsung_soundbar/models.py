@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from pysmartthings import SmartThings
 
@@ -15,3 +16,4 @@ class DeviceConfig:
 class SoundbarConfig:
     api: SmartThings
     devices: dict
+    auth_provider: Any | None = None

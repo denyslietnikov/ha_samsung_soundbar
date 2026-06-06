@@ -10,6 +10,14 @@ CONF_ENTRY_DEVICE_ID = "device_id"
 CONF_ENTRY_DEVICE_NAME = "device_name"
 CONF_ENTRY_MAX_VOLUME = "device_volume"
 
+SMARTTHINGS_AUTHORIZE_URL = "https://api.smartthings.com/oauth/authorize"
+SMARTTHINGS_TOKEN_URL = "https://auth-global.api.smartthings.com/oauth/token"
+SMARTTHINGS_OAUTH_SCOPES = [
+    "r:devices:*",
+    "x:devices:*",
+    "r:locations:*",
+]
+
 CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES = "settings_advanced_audio"
 CONF_ENTRY_SETTINGS_EQ_SELECTOR = "settings_eq"
 CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR = "settings_soundmode"

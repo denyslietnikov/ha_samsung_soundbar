@@ -2,9 +2,10 @@ import asyncio
 import datetime
 import json
 import logging
+from typing import Any
 from urllib.parse import quote
 
-from pysmartthings import DeviceEntity
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from .const import SpeakerIdentifier, RearSpeakerMode
 from ..const import DOMAIN
@@ -15,10 +16,11 @@ log = logging.getLogger(__name__)
 class SoundbarDevice:
     def __init__(
             self,
-            device: DeviceEntity,
+            device: Any,
             session,
             max_volume: int,
             device_name: str,
+            auth_provider=None,
             enable_eq: bool = False,
             enable_soundmode: bool = False,
             enable_advanced_audio: bool = False,
@@ -26,7 +28,7 @@ class SoundbarDevice:
     ):
         self.device = device
         self._device_id = self.device.device_id
-        self._api_key = self.device._api.token
+        self.__auth_provider = auth_provider
         self.__session = session
         self.__device_name = device_name
 
@@ -58,6 +60,9 @@ class SoundbarDevice:
         self.__max_volume = max_volume
 
     async def update(self):
+        if self.__auth_provider is not None:
+            await self.__auth_provider.async_get_access_token()
+
         await self.device.status.refresh()
 
         await self._update_media()
@@ -453,10 +458,31 @@ class SoundbarDevice:
 
     async def get_execute_status(self):
         url = f"https://api.smartthings.com/v1/devices/{self._device_id}/components/main/capabilities/execute/status"
-        request_headers = {"Authorization": "Bearer " + self._api_key}
-        resp = await self.__session.get(url, headers=request_headers)
+        resp = await self.__get_execute_status_response(url)
+
+        if resp.status == 401 and self.__auth_provider is not None:
+            resp.release()
+            resp = await self.__get_execute_status_response(url, force_refresh=True)
+
+        if resp.status == 401:
+            raise ConfigEntryAuthFailed("SmartThings OAuth token is invalid")
+
+        resp.raise_for_status()
         dict_stuff = await resp.json()
         return dict_stuff["data"]["value"]["payload"]
+
+    async def __get_execute_status_response(
+        self, url: str, force_refresh: bool = False
+    ):
+        if self.__auth_provider is not None:
+            api_key = await self.__auth_provider.async_get_access_token(
+                force_refresh=force_refresh
+            )
+        else:
+            api_key = self.device._api.token
+
+        request_headers = {"Authorization": "Bearer " + api_key}
+        return await self.__session.get(url, headers=request_headers)
 
     async def get_song_title_artwork(self, artist: str, title: str) -> str:
         """
