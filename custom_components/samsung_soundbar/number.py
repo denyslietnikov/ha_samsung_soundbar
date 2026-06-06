@@ -42,7 +42,7 @@ class SoundbarWooferNumberEntity(NumberEntity):
     ):
         self.entity_description = NumberEntityDescription(
             native_max_value=6,
-            native_min_value=-10,
+            native_min_value=-12,
             mode=NumberMode.BOX,
             native_step=1,
             native_unit_of_measurement="dB",
