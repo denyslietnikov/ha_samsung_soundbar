@@ -1,10 +1,6 @@
 import logging
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
-)
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import PERCENTAGE
 from homeassistant.helpers.entity import DeviceInfo
 
@@ -30,7 +26,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 class VolumeSensor(SensorEntity):
     def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):
-        self.entity_id = f"sensor.{device.device_name}_{append_unique_id}"
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
         self.__base_icon = icon_string
@@ -43,9 +38,7 @@ class VolumeSensor(SensorEntity):
         )
         self.__append_unique_id = append_unique_id
         self._attr_name = "Volume Level"
-        self._attr_device_class = SensorDeviceClass.VOLUME
         self._attr_native_unit_of_measurement = PERCENTAGE
-        self._attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def icon(self) -> str | None:

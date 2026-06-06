@@ -4,7 +4,7 @@ from typing import Any, Mapping
 from homeassistant.components.media_player import MediaPlayerEntity
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.entity import DeviceInfo, generate_entity_id
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers import config_validation as cv, entity_platform, selector
 import voluptuous as vol
 
@@ -112,19 +112,15 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         session = async_get_clientsession(hass)
         device = device_config.device
         if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
-            entity_id = generate_entity_id(
-                "media_player.{}", device.device_name, hass=hass
-            )
-            entities.append(SmartThingsSoundbarMediaPlayer(device, entity_id, session))
+            entities.append(SmartThingsSoundbarMediaPlayer(device, session))
     async_add_entities(entities)
     return True
 
 
 class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
-    def __init__(self, device: SoundbarDevice, entity_id: str, session):
+    def __init__(self, device: SoundbarDevice, session):
         self.session = session
         self.device = device
-        self.entity_id = entity_id
         self._attr_unique_id = f"{self.device.device_id}_mp"
 
         self._attr_device_info = DeviceInfo(

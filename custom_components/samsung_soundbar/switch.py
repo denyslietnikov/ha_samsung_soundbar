@@ -72,8 +72,6 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
         off_function,
         icon_string: str = "mdi:toggle-switch-variant",
     ):
-        self.entity_id = f"switch.{device.device_name}_{append_unique_id}"
-
         self.__device = device
         display_name = SWITCH_ENTITY_NAMES.get(append_unique_id, append_unique_id)
         self._name = f"{self.__device.device_name} {display_name}"

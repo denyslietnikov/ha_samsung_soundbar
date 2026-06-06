@@ -31,10 +31,11 @@ class SoundbarImageEntity(ImageEntity):
         self, device: SoundbarDevice, append_unique_id: str, hass: HomeAssistant
     ):
         super().__init__(hass)
-        self.entity_id = f"image.{device.device_name}_{append_unique_id}"
 
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
+        self._attr_name = "Media Artwork"
+        self._attr_entity_registry_enabled_default = False
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.__device.device_id)},
             name=self.__device.device_name,
@@ -62,4 +63,4 @@ class SoundbarImageEntity(ImageEntity):
 
     @property
     def name(self):
-        return self.__device.device_name
+        return self._attr_name

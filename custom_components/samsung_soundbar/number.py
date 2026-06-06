@@ -40,7 +40,6 @@ class SoundbarWooferNumberEntity(NumberEntity):
         device: SoundbarDevice,
         append_unique_id: str,
     ):
-        self.entity_id = f"number.{device.device_name}_{append_unique_id}"
         self.entity_description = NumberEntityDescription(
             native_max_value=6,
             native_min_value=-10,

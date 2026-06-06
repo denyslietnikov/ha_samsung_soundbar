@@ -61,7 +61,6 @@ class EqPresetSelectEntity(SelectEntity):
         append_unique_id: str,
         icon_string: str,
     ):
-        self.entity_id = f"select.{device.device_name}_{append_unique_id}"
         self.entity_description = SelectEntityDescription(
             key=append_unique_id,
         )
@@ -114,7 +113,6 @@ class SoundModeSelectEntity(SelectEntity):
         append_unique_id: str,
         icon_string: str,
     ):
-        self.entity_id = f"select.{device.device_name}_{append_unique_id}"
         self.entity_description = SelectEntityDescription(
             key=append_unique_id,
         )
@@ -167,7 +165,6 @@ class InputSelectEntity(SelectEntity):
         append_unique_id: str,
         icon_string: str,
     ):
-        self.entity_id = f"select.{device.device_name}_{append_unique_id}"
         self.entity_description = SelectEntityDescription(
             key=append_unique_id,
         )
