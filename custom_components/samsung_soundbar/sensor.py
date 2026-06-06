@@ -79,6 +79,11 @@ class InputSourceSensor(SensorEntity):
         """Return the current soundbar input source."""
         return self.__device.input_source
 
+    @property
+    def extra_state_attributes(self) -> dict[str, list[str]]:
+        """Return supported input sources as diagnostic attributes."""
+        return {"supported_sources": self.__device.supported_input_sources}
+
 
 class SoundFromSensor(SensorEntity):
     def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):

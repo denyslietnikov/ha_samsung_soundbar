@@ -16,7 +16,7 @@ This fork mainly focuses on:
 
 ## OAuth Beta Setup
 
-Beta `0.7.0b21` targets Home Assistant `2026.1.0` or newer.
+Beta `0.7.0b24` targets Home Assistant `2026.1.0` or newer.
 
 This fork uses SmartThings OAuth instead of a Personal Access Token. Before adding the integration, create a SmartThings OAuth-In application and add its `client_id` and `client_secret` in Home Assistant under Application Credentials for the `Samsung Soundbar` integration.
 

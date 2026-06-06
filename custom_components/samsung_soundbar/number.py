@@ -8,8 +8,7 @@ from homeassistant.components.number import (
 from homeassistant.helpers.entity import DeviceInfo
 
 from .api_extension.SoundbarDevice import SoundbarDevice
-from .const import CONF_ENTRY_DEVICE_ID, CONF_ENTRY_SETTINGS_WOOFER_NUMBER, DOMAIN
-from .entry_options import get_entry_option
+from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -24,7 +23,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         device = device_config.device
         if device.device_id == config_entry.data.get(
             CONF_ENTRY_DEVICE_ID
-        ) and get_entry_option(config_entry, CONF_ENTRY_SETTINGS_WOOFER_NUMBER):
+        ) and device.can_control_woofer_level:
             entities.append(
                 SoundbarWooferNumberEntity(
                     device,

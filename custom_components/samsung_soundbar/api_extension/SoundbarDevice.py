@@ -60,21 +60,25 @@ class SoundbarDevice:
         self.__enable_soundmode = enable_soundmode
         self.__supported_soundmodes = []
         self.__active_soundmode = ""
+        self.__soundmode_supported = False
 
         self.__enable_woofer = enable_woofer
         self.__woofer_level = 0
         self.__woofer_connection = ""
+        self.__woofer_supported = False
 
         self.__enable_eq = enable_eq
         self.__active_eq_preset = ""
         self.__supported_eq_presets = []
         self.__eq_action = ""
         self.__eq_bands = []
+        self.__equalizer_supported = False
 
         self.__enable_advanced_audio = enable_advanced_audio
         self.__voice_amplifier = 0
         self.__night_mode = 0
         self.__bass_mode = 0
+        self.__advanced_audio_supported = False
 
         self.__media_title = ""
         self.__media_artist = ""
@@ -82,6 +86,7 @@ class SoundbarDevice:
         self.__media_cover_url_update_time: datetime.datetime | None = None
         self.__old_media_key = ""
         self.__last_execute_payload_dump: dict[str, Any] | None = None
+        self.__unsupported_execute_payload_hrefs: set[str] = set()
 
         self.__max_volume = max_volume
 
@@ -250,6 +255,15 @@ class SoundbarDevice:
             else tuple(required_keys)
         )
 
+        if href in self.__unsupported_execute_payload_hrefs:
+            log.debug(
+                "[%s] async_request_execute_payload: skipping unsupported hidden "
+                "payload href %r",
+                DOMAIN,
+                href,
+            )
+            return None
+
         await self.update_execution_data([href])
         await asyncio.sleep(initial_sleep)
         payload = await self.get_execute_status()
@@ -261,12 +275,13 @@ class SoundbarDevice:
             missing_keys = self.__missing_payload_keys(payload, keys)
             retry += 1
         if missing_keys:
-            log.error(
-                "[%s] async_request_execute_payload: required keys %s not found "
-                "in payload for href %r after %d retries; payload keys: %s",
+            self.__unsupported_execute_payload_hrefs.add(href)
+            log.debug(
+                "[%s] async_request_execute_payload: hidden payload href %r did "
+                "not expose required keys %s after %d retries; payload keys: %s",
                 DOMAIN,
-                missing_keys,
                 href,
+                missing_keys,
                 max_retries,
                 sorted(payload),
             )
@@ -308,6 +323,7 @@ class SoundbarDevice:
             "x.com.samsung.networkaudio.supportedSoundmode"
         ]
         self.__active_soundmode = payload["x.com.samsung.networkaudio.soundmode"]
+        self.__soundmode_supported = True
 
     async def _update_woofer(self):
         payload = await self.async_request_execute_payload(
@@ -321,6 +337,7 @@ class SoundbarDevice:
             return
         self.__woofer_level = payload["x.com.samsung.networkaudio.woofer"]
         self.__woofer_connection = payload["x.com.samsung.networkaudio.connection"]
+        self.__woofer_supported = True
 
     async def _update_equalizer(self):
         payload = await self.async_request_execute_payload(
@@ -340,6 +357,7 @@ class SoundbarDevice:
         ]
         self.__eq_action = payload["x.com.samsung.networkaudio.action"]
         self.__eq_bands = payload["x.com.samsung.networkaudio.EQband"]
+        self.__equalizer_supported = True
 
     async def _update_advanced_audio(self):
         payload = await self.async_request_execute_payload(
@@ -355,6 +373,7 @@ class SoundbarDevice:
         self.__night_mode = payload["x.com.samsung.networkaudio.nightmode"]
         self.__bass_mode = payload["x.com.samsung.networkaudio.bassboost"]
         self.__voice_amplifier = payload["x.com.samsung.networkaudio.voiceamplifier"]
+        self.__advanced_audio_supported = True
 
     @property
     def status(self):
@@ -406,7 +425,27 @@ class SoundbarDevice:
 
     @property
     def can_select_sound_mode(self) -> bool:
-        return bool(self.__enable_soundmode and self.supported_soundmodes)
+        return bool(
+            self.__enable_soundmode
+            and self.__soundmode_supported
+            and self.supported_soundmodes
+        )
+
+    @property
+    def can_select_equalizer_preset(self) -> bool:
+        return bool(
+            self.__enable_eq
+            and self.__equalizer_supported
+            and self.supported_equalizer_presets
+        )
+
+    @property
+    def can_control_woofer_level(self) -> bool:
+        return bool(self.__enable_woofer and self.__woofer_supported)
+
+    @property
+    def can_control_advanced_audio(self) -> bool:
+        return bool(self.__enable_advanced_audio and self.__advanced_audio_supported)
 
     # ------------ ON / OFF ------------
 
