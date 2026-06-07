@@ -20,7 +20,16 @@ from pysmartthings.exceptions import (
 )
 
 from .const import SpeakerIdentifier, RearSpeakerMode
-from ..const import DOMAIN
+from ..const import (
+    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+    CONTROL_MODE_SMARTTHINGS_CLOUD,
+    DOMAIN,
+)
+from ..local_rpc import (
+    LOCAL_SOUND_MODE_VALUES,
+    LocalRpcError,
+    LocalSoundbarRpcClient,
+)
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +48,44 @@ _TRANSIENT_ERROR_STATUSES = {
 _OPTIMISTIC_MUTE_TIMEOUT = datetime.timedelta(seconds=60)
 _ARTWORK_RETRY_INTERVAL = datetime.timedelta(minutes=5)
 _ARTWORK_URL_KEY_HINTS = ("art", "cover", "image", "thumbnail")
+_LOCAL_SOURCE_TO_HA = {
+    "HDMI_IN1": "HDMI1",
+    "HDMI_IN2": "HDMI2",
+    "E_ARC": "TV ARC",
+    "ARC": "TV ARC",
+    "D_IN": "D.IN",
+    "BT": "BT",
+    "WIFI_IDLE": "WIFI",
+}
+_HA_SOURCE_TO_LOCAL = {
+    **{value: key for key, value in _LOCAL_SOURCE_TO_HA.items()},
+    "HDMI1": "HDMI_IN1",
+    "HDMI2": "HDMI_IN2",
+    "TV ARC": "E_ARC",
+    "ARC": "ARC",
+    "E_ARC": "E_ARC",
+    "D.IN": "D_IN",
+    "D_IN": "D_IN",
+    "WIFI": "WIFI_IDLE",
+    "WIFI_IDLE": "WIFI_IDLE",
+}
+_LOCAL_SOUND_MODE_TO_HA = {
+    "STANDARD": "Standard",
+    "SURROUND": "Surround",
+    "GAME": "Game",
+    "ADAPTIVE": "Adaptive Sound",
+    "MOVIE": "Movie",
+    "MUSIC": "Music",
+    "CLEARVOICE": "Clear Voice",
+    "DTS_VIRTUAL_X": "DTS Virtual X",
+}
+_HA_SOUND_MODE_TO_LOCAL = {
+    **{value: key for key, value in _LOCAL_SOUND_MODE_TO_HA.items()},
+    **{value.upper(): value for value in LOCAL_SOUND_MODE_VALUES},
+    "ADAPTIVE SOUND": "ADAPTIVE",
+    "CLEAR VOICE": "CLEARVOICE",
+    "DTS VIRTUAL X": "DTS_VIRTUAL_X",
+}
 
 
 class SoundbarDevice:
@@ -53,12 +100,21 @@ class SoundbarDevice:
             enable_soundmode: bool = False,
             enable_advanced_audio: bool = False,
             enable_woofer: bool = False,
+            control_mode: str = CONTROL_MODE_SMARTTHINGS_CLOUD,
+            local_rpc: LocalSoundbarRpcClient | None = None,
+            local_fallback_to_cloud: bool = True,
     ):
         self.device = device
         self._device_id = self.device.device_id
         self.__auth_provider = auth_provider
         self.__session = session
         self.__device_name = device_name
+        self.__control_mode = control_mode
+        self.__local_rpc = local_rpc
+        self.__local_fallback_to_cloud = local_fallback_to_cloud
+        self.__local_status: dict[str, Any] = {}
+        self.__local_available = False
+        self.__local_last_error: str | None = None
 
         self.__enable_soundmode = enable_soundmode
         self.__supported_soundmodes = []
@@ -105,10 +161,11 @@ class SoundbarDevice:
             "refresh device status",
         )
         self.__sync_optimistic_mute()
+        await self.__update_local_status()
 
         await self._update_media()
 
-        if self.__enable_soundmode:
+        if self.__enable_soundmode and not self.hybrid_mode:
             await self._update_soundmode()
         if self.__enable_advanced_audio:
             await self._update_advanced_audio()
@@ -157,6 +214,107 @@ class SoundbarDevice:
             raise HomeAssistantError(
                 f"SmartThings rejected {description}: {err}"
             ) from err
+
+    @property
+    def hybrid_mode(self) -> bool:
+        return bool(
+            self.__control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
+            and self.__local_rpc is not None
+        )
+
+    @property
+    def control_mode(self) -> str:
+        return self.__control_mode
+
+    @property
+    def local_available(self) -> bool:
+        return self.__local_available
+
+    @property
+    def local_last_error(self) -> str | None:
+        return self.__local_last_error
+
+    @property
+    def local_codec(self) -> str | None:
+        return self.__local_value("codec")
+
+    @property
+    def local_identifier(self) -> str | None:
+        return self.__local_value("identifier")
+
+    async def __update_local_status(self) -> None:
+        if not self.hybrid_mode or self.__local_rpc is None:
+            return
+
+        try:
+            self.__local_status = await self.__local_rpc.status()
+            self.__local_available = True
+            self.__local_last_error = None
+        except LocalRpcError as err:
+            self.__local_available = False
+            self.__local_last_error = str(err)
+            log.debug(
+                "[%s] Local RPC status update failed for %s: %s",
+                DOMAIN,
+                self.device_name,
+                err,
+            )
+
+    async def __try_local_rpc(
+        self,
+        action: Callable[[LocalSoundbarRpcClient], Awaitable[Any]],
+        description: str,
+    ) -> bool:
+        if not self.hybrid_mode or self.__local_rpc is None:
+            return False
+
+        try:
+            await action(self.__local_rpc)
+            self.__local_available = True
+            self.__local_last_error = None
+            await self.__update_local_status()
+            return True
+        except (LocalRpcError, ValueError) as err:
+            self.__local_available = False
+            self.__local_last_error = str(err)
+            log.warning(
+                "[%s] Local RPC failed during %s for %s: %s",
+                DOMAIN,
+                description,
+                self.device_name,
+                err,
+            )
+            if self.__local_fallback_to_cloud:
+                return False
+            raise HomeAssistantError(
+                f"Local soundbar RPC failed during {description}: {err}"
+            ) from err
+
+    def __local_value(self, key: str) -> Any:
+        if not self.hybrid_mode or not self.__local_available:
+            return None
+        value = self.__local_status.get(key)
+        return value if value not in ("", None) else None
+
+    @staticmethod
+    def __ha_source_from_local(source: str | None) -> str | None:
+        if source is None:
+            return None
+        return _LOCAL_SOURCE_TO_HA.get(source, source)
+
+    @staticmethod
+    def __local_source_from_ha(source: str) -> str:
+        return _HA_SOURCE_TO_LOCAL.get(source, source)
+
+    @staticmethod
+    def __ha_sound_mode_from_local(sound_mode: str | None) -> str | None:
+        if sound_mode is None:
+            return None
+        return _LOCAL_SOUND_MODE_TO_HA.get(sound_mode, sound_mode)
+
+    @staticmethod
+    def __local_sound_mode_from_ha(sound_mode: str) -> str:
+        return _HA_SOUND_MODE_TO_LOCAL.get(sound_mode, sound_mode.upper())
 
     async def _update_media(self):
         audio_track_status = self.device.status._attributes.get("audioTrackData")
@@ -481,15 +639,15 @@ class SoundbarDevice:
 
     @property
     def can_turn_on_off(self) -> bool:
-        return self.has_status_capability("switch")
+        return self.hybrid_mode or self.has_status_capability("switch")
 
     @property
     def can_control_volume(self) -> bool:
-        return self.has_status_capability("audioVolume")
+        return self.hybrid_mode or self.has_status_capability("audioVolume")
 
     @property
     def can_mute_volume(self) -> bool:
-        return self.has_status_capability("audioMute")
+        return self.hybrid_mode or self.has_status_capability("audioMute")
 
     @property
     def can_control_playback(self) -> bool:
@@ -497,6 +655,8 @@ class SoundbarDevice:
 
     @property
     def can_select_sound_mode(self) -> bool:
+        if self.hybrid_mode:
+            return True
         return bool(
             self.__enable_soundmode
             and self.__soundmode_supported
@@ -527,6 +687,16 @@ class SoundbarDevice:
 
     @property
     def state(self) -> str:
+        local_power = self.__local_value("power")
+        if local_power is not None:
+            if local_power == "powerOff":
+                return "off"
+            if self.device.status.playback_status == "playing":
+                return "playing"
+            if self.device.status.playback_status == "paused":
+                return "paused"
+            return "on"
+
         if self.device.status.switch:
             if self.device.status.playback_status == "playing":
                 return "playing"
@@ -538,12 +708,18 @@ class SoundbarDevice:
             return "off"
 
     async def switch_off(self):
+        if await self.__try_local_rpc(lambda local: local.power_off(), "switch off"):
+            return
+
         await self.__call_smartthings(
             lambda: self.device.switch_off(True),
             "switch off",
         )
 
     async def switch_on(self):
+        if await self.__try_local_rpc(lambda local: local.power_on(), "switch on"):
+            return
+
         await self.__call_smartthings(
             lambda: self.device.switch_on(True),
             "switch on",
@@ -553,6 +729,12 @@ class SoundbarDevice:
 
     @property
     def volume_level(self) -> float:
+        local_volume = self.__local_value("volume")
+        if local_volume is not None:
+            if local_volume > self.__max_volume:
+                return 1.0
+            return local_volume / self.__max_volume
+
         vol = self.device.status.volume
         if vol > self.__max_volume:
             return 1.0
@@ -560,6 +742,10 @@ class SoundbarDevice:
 
     @property
     def volume_muted(self) -> bool:
+        local_mute = self.__local_value("mute")
+        if local_mute is not None:
+            return bool(local_mute)
+
         if self.__optimistic_mute is not None:
             return self.__optimistic_mute
         return self.device.status.mute
@@ -570,12 +756,29 @@ class SoundbarDevice:
         This respects the max volume and hovers between
         :param volume: between 0 and 1
         """
+        local_level = int(volume * self.__max_volume)
+        if await self.__try_local_rpc(
+            lambda local: local.set_volume(local_level),
+            "set volume",
+        ):
+            return
+
         await self.__call_smartthings(
             lambda: self.device.set_volume(int(volume * self.__max_volume), True),
             "set volume",
         )
 
     async def mute_volume(self, mute: bool):
+        if self.hybrid_mode:
+            if mute == self.volume_muted:
+                return
+            if await self.__try_local_rpc(
+                lambda local: local.mute_toggle(),
+                "mute volume",
+            ):
+                self.__local_status["mute"] = mute
+                return
+
         if mute:
             await self.__call_smartthings(
                 lambda: self.device.mute(True),
@@ -610,12 +813,18 @@ class SoundbarDevice:
             self.__optimistic_mute_updated_at = None
 
     async def volume_up(self):
+        if await self.__try_local_rpc(lambda local: local.volume_up(), "volume up"):
+            return
+
         await self.__call_smartthings(
             lambda: self.device.volume_up(True),
             "volume up",
         )
 
     async def volume_down(self):
+        if await self.__try_local_rpc(lambda local: local.volume_down(), "volume down"):
+            return
+
         await self.__call_smartthings(
             lambda: self.device.volume_down(True),
             "volume down",
@@ -643,6 +852,10 @@ class SoundbarDevice:
 
     @property
     def input_source(self):
+        local_source = self.__local_value("input_source")
+        if local_source is not None:
+            return self.__ha_source_from_local(local_source)
+
         if self.media_app_name in ("AirPlay", "Spotify"):
             return "WIFI"
         return self.device.status.input_source
@@ -657,14 +870,29 @@ class SoundbarDevice:
 
     @property
     def supported_input_sources(self):
-        sources = list(self.device.status.supported_input_sources or [])
+        if self.hybrid_mode:
+            sources = list(self.device.status.supported_input_sources or [])
+            if not sources:
+                sources = [
+                    self.__ha_source_from_local(source)
+                    for source in ("D_IN", "HDMI_IN1", "BT", "E_ARC", "WIFI_IDLE")
+                ]
+        else:
+            sources = list(self.device.status.supported_input_sources or [])
+
+        sources = [source for source in sources if source]
         current = self.input_source
         if current and current not in sources:
             sources.append(current)
-        return sources
+        return list(dict.fromkeys(sources))
 
     @property
     def can_select_source(self) -> bool:
+        if self.hybrid_mode:
+            return True
+        return self.__can_select_source_cloud()
+
+    def __can_select_source_cloud(self) -> bool:
         can_set_input_source = getattr(self.device, "can_set_input_source", None)
         if can_set_input_source is not None:
             return bool(can_set_input_source)
@@ -680,7 +908,22 @@ class SoundbarDevice:
         return bool(self.supported_input_sources)
 
     async def select_source(self, source: str):
-        if not self.can_select_source:
+        if self.hybrid_mode:
+            local_source = self.__local_source_from_ha(source)
+            if await self.__try_local_rpc(
+                lambda local: local.select_input(local_source),
+                "select input source",
+            ):
+                self.__local_status["input_source"] = local_source
+                return
+
+            if not self.__can_select_source_cloud():
+                raise HomeAssistantError(
+                    "Local input source control is unavailable and "
+                    "SmartThings input source is read-only for this soundbar"
+                )
+
+        if not self.__can_select_source_cloud():
             raise HomeAssistantError(
                 "Input source is read-only for this soundbar in the SmartThings API"
             )
@@ -693,13 +936,35 @@ class SoundbarDevice:
     # ------------- SOUND MODE --------------
     @property
     def sound_mode(self):
+        local_sound_mode = self.__local_value("sound_mode")
+        if local_sound_mode is not None:
+            return self.__ha_sound_mode_from_local(local_sound_mode)
         return self.__active_soundmode
 
     @property
     def supported_soundmodes(self):
+        if self.hybrid_mode:
+            current = self.sound_mode
+            sound_modes = [
+                self.__ha_sound_mode_from_local(sound_mode)
+                for sound_mode in LOCAL_SOUND_MODE_VALUES
+            ]
+            sound_modes = [sound_mode for sound_mode in sound_modes if sound_mode]
+            if current and current not in sound_modes:
+                sound_modes.append(current)
+            return list(dict.fromkeys(sound_modes))
         return self.__supported_soundmodes
 
     async def select_sound_mode(self, sound_mode: str):
+        if self.hybrid_mode:
+            local_sound_mode = self.__local_sound_mode_from_ha(sound_mode)
+            if await self.__try_local_rpc(
+                lambda local: local.set_sound_mode(local_sound_mode),
+                "select sound mode",
+            ):
+                self.__local_status["sound_mode"] = local_sound_mode
+                return
+
         await self.set_custom_execution_data(
             href="/sec/networkaudio/soundmode",
             property="x.com.samsung.networkaudio.soundmode",

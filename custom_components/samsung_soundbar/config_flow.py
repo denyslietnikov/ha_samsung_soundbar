@@ -25,6 +25,7 @@ from pysmartthings.exceptions import (
 )
 
 from .const import (
+    CONF_CONTROL_MODE,
     CONF_ENTRY_DEVICE_ID,
     CONF_ENTRY_MAX_VOLUME,
     CONF_ENTRY_DEVICE_NAME,
@@ -32,10 +33,18 @@ from .const import (
     CONF_ENTRY_SETTINGS_EQ_SELECTOR,
     CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
     CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
+    CONF_LOCAL_FALLBACK_TO_CLOUD,
+    CONF_LOCAL_HOST,
+    CONF_LOCAL_PORT,
+    CONF_LOCAL_TIMEOUT,
+    CONF_LOCAL_VERIFY_SSL,
+    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+    CONTROL_MODES,
     DOMAIN,
     SMARTTHINGS_OAUTH_SCOPES,
 )
 from .entry_options import get_entry_options
+from .local_rpc import LocalRpcError, LocalSoundbarRpcClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -213,34 +222,104 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Manage Samsung Soundbar feature options."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+        errors: dict[str, str] = {}
 
-        options = get_entry_options(self.config_entry)
+        if user_input is not None:
+            options = get_entry_options(self.config_entry)
+            options.update(user_input)
+
+            if options[CONF_CONTROL_MODE] == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS:
+                local_host = str(options.get(CONF_LOCAL_HOST, "")).strip()
+                options[CONF_LOCAL_HOST] = local_host
+                if not local_host:
+                    errors[CONF_LOCAL_HOST] = "required"
+                else:
+                    try:
+                        await self._async_validate_local_rpc(options)
+                    except LocalRpcError as err:
+                        _LOGGER.warning(
+                            "Cannot connect to local soundbar RPC at %s:%s: %s",
+                            local_host,
+                            options[CONF_LOCAL_PORT],
+                            err,
+                        )
+                        errors["base"] = "cannot_connect"
+
+            if not errors:
+                return self.async_create_entry(title="", data=options)
+        else:
+            options = get_entry_options(self.config_entry)
+
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
-                        default=options[CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES],
-                    ): bool,
-                    vol.Required(
-                        CONF_ENTRY_SETTINGS_EQ_SELECTOR,
-                        default=options[CONF_ENTRY_SETTINGS_EQ_SELECTOR],
-                    ): bool,
-                    vol.Required(
-                        CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
-                        default=options[CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR],
-                    ): bool,
-                    vol.Required(
-                        CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
-                        default=options[CONF_ENTRY_SETTINGS_WOOFER_NUMBER],
-                    ): bool,
-                    vol.Required(
-                        CONF_ENTRY_MAX_VOLUME,
-                        default=options[CONF_ENTRY_MAX_VOLUME],
-                    ): vol.All(int, vol.Range(min=1, max=100)),
-                }
-            ),
+            data_schema=self._options_schema(options),
+            errors=errors,
+        )
+
+    async def _async_validate_local_rpc(self, options: dict[str, Any]) -> None:
+        """Validate local JSON-RPC options."""
+        session = async_get_clientsession(
+            self.hass,
+            verify_ssl=options[CONF_LOCAL_VERIFY_SSL],
+        )
+        client = LocalSoundbarRpcClient(
+            options[CONF_LOCAL_HOST],
+            session,
+            port=options[CONF_LOCAL_PORT],
+            verify_ssl=options[CONF_LOCAL_VERIFY_SSL],
+            timeout=options[CONF_LOCAL_TIMEOUT],
+        )
+        await client.create_token()
+        await client.call("getIdentifier")
+
+    @staticmethod
+    def _options_schema(options: dict[str, Any]) -> vol.Schema:
+        """Return the options schema with current defaults."""
+        return vol.Schema(
+            {
+                vol.Required(
+                    CONF_CONTROL_MODE,
+                    default=options[CONF_CONTROL_MODE],
+                ): vol.In(CONTROL_MODES),
+                vol.Optional(
+                    CONF_LOCAL_HOST,
+                    default=options[CONF_LOCAL_HOST],
+                ): str,
+                vol.Required(
+                    CONF_LOCAL_PORT,
+                    default=options[CONF_LOCAL_PORT],
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+                vol.Required(
+                    CONF_LOCAL_VERIFY_SSL,
+                    default=options[CONF_LOCAL_VERIFY_SSL],
+                ): bool,
+                vol.Required(
+                    CONF_LOCAL_TIMEOUT,
+                    default=options[CONF_LOCAL_TIMEOUT],
+                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=60)),
+                vol.Required(
+                    CONF_LOCAL_FALLBACK_TO_CLOUD,
+                    default=options[CONF_LOCAL_FALLBACK_TO_CLOUD],
+                ): bool,
+                vol.Required(
+                    CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
+                    default=options[CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES],
+                ): bool,
+                vol.Required(
+                    CONF_ENTRY_SETTINGS_EQ_SELECTOR,
+                    default=options[CONF_ENTRY_SETTINGS_EQ_SELECTOR],
+                ): bool,
+                vol.Required(
+                    CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
+                    default=options[CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR],
+                ): bool,
+                vol.Required(
+                    CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
+                    default=options[CONF_ENTRY_SETTINGS_WOOFER_NUMBER],
+                ): bool,
+                vol.Required(
+                    CONF_ENTRY_MAX_VOLUME,
+                    default=options[CONF_ENTRY_MAX_VOLUME],
+                ): vol.All(int, vol.Range(min=1, max=100)),
+            }
         )

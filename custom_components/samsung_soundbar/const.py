@@ -22,6 +22,19 @@ CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES = "settings_advanced_audio"
 CONF_ENTRY_SETTINGS_EQ_SELECTOR = "settings_eq"
 CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR = "settings_soundmode"
 CONF_ENTRY_SETTINGS_WOOFER_NUMBER = "settings_woofer"
+CONF_CONTROL_MODE = "control_mode"
+CONF_LOCAL_FALLBACK_TO_CLOUD = "local_fallback_to_cloud"
+CONF_LOCAL_HOST = "local_host"
+CONF_LOCAL_PORT = "local_port"
+CONF_LOCAL_TIMEOUT = "local_timeout"
+CONF_LOCAL_VERIFY_SSL = "local_verify_ssl"
+
+CONTROL_MODE_SMARTTHINGS_CLOUD = "smartthings_cloud"
+CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS = "hybrid_local_smartthings"
+CONTROL_MODES = (
+    CONTROL_MODE_SMARTTHINGS_CLOUD,
+    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+)
 
 SERVICE_DUMP_EXECUTE_PAYLOAD = "dump_execute_payload"
 SERVICE_DUMP_LOCAL_RPC = "dump_local_rpc"
