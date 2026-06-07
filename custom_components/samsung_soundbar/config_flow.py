@@ -38,8 +38,8 @@ from .const import (
     CONF_LOCAL_PORT,
     CONF_LOCAL_TIMEOUT,
     CONF_LOCAL_VERIFY_SSL,
+    CONTROL_MODE_LABELS,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
-    CONTROL_MODES,
     DOMAIN,
     SMARTTHINGS_OAUTH_SCOPES,
 )
@@ -280,7 +280,7 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                 vol.Required(
                     CONF_CONTROL_MODE,
                     default=options[CONF_CONTROL_MODE],
-                ): vol.In(CONTROL_MODES),
+                ): vol.In(CONTROL_MODE_LABELS),
                 vol.Optional(
                     CONF_LOCAL_HOST,
                     default=options[CONF_LOCAL_HOST],

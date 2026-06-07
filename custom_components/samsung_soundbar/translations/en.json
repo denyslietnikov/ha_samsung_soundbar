@@ -26,7 +26,7 @@
             },
             "reconfigure_confirm": {
                 "data": {
-                    "settings_advanced_audio": "Enable 'Advanced Audio switches' capabilities (NightMode, BassMode, VoiceEnhancer)",
+                    "settings_advanced_audio": "Enable 'Advanced Audio switches' capabilities (NightMode, BassMode, VoiceEnhancer, Virtual)",
                     "settings_eq": "Enable 'EQ selector' capabilities",
                     "settings_soundmode": "Enable 'Soundmode selector' capabilities",
                     "settings_woofer": "Enable 'Woofer number' capability",
@@ -63,7 +63,7 @@
                     "local_verify_ssl": "Verify local SSL certificate",
                     "local_timeout": "Local RPC timeout",
                     "local_fallback_to_cloud": "Fallback to SmartThings Cloud when local RPC fails",
-                    "settings_advanced_audio": "Enable Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier)",
+                    "settings_advanced_audio": "Enable Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier, Virtual)",
                     "settings_eq": "Enable EQ selector",
                     "settings_soundmode": "Enable Sound Mode selector",
                     "settings_woofer": "Enable Woofer number entity",
@@ -226,6 +226,36 @@
                 "include_null": {
                     "name": "Include null values",
                     "description": "Include capabilities and attributes whose value is null."
+                }
+            }
+        },
+        "dump_discovery_snapshot": {
+            "name": "Dump discovery snapshot",
+            "description": "Return a raw and flattened SmartThings status snapshot for before/after feature discovery.",
+            "fields": {
+                "device_id": {
+                    "name": "Device",
+                    "description": "Samsung Soundbar device. Required only when multiple soundbars are loaded."
+                },
+                "include_null": {
+                    "name": "Include null values",
+                    "description": "Include capabilities and attributes whose value is null."
+                },
+                "include_raw_status": {
+                    "name": "Include raw status",
+                    "description": "Include the complete raw /status response. This can be large."
+                },
+                "include_flattened_status": {
+                    "name": "Include flattened status",
+                    "description": "Include dot-path status values that are easier to compare before and after changing a setting."
+                },
+                "include_execute_status": {
+                    "name": "Include execute status",
+                    "description": "Include the raw execute capability status and extracted execute payload."
+                },
+                "execute_hrefs": {
+                    "name": "Execute hrefs",
+                    "description": "Optional hidden execute hrefs to request during the snapshot. Leave empty for a non-mutating status-only snapshot."
                 }
             }
         }

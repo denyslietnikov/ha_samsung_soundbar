@@ -241,6 +241,66 @@ dump_status_summary:
       selector:
         boolean:
 
+dump_discovery_snapshot:
+  name: Dump discovery snapshot
+  description: Return a raw and flattened SmartThings status snapshot for before/after feature discovery.
+  fields:
+    device_id:
+      name: Device
+      description: Samsung Soundbar device. Required only when multiple soundbars are loaded.
+      required: false
+      selector:
+        device:
+          integration: samsung_soundbar
+    include_null:
+      name: Include null values
+      description: Include capabilities and attributes whose value is null.
+      required: false
+      default: true
+      selector:
+        boolean:
+    include_raw_status:
+      name: Include raw status
+      description: Include the complete raw /status response. This can be large.
+      required: false
+      default: false
+      selector:
+        boolean:
+    include_flattened_status:
+      name: Include flattened status
+      description: Include dot-path status values that are easier to compare before and after changing a setting.
+      required: false
+      default: true
+      selector:
+        boolean:
+    include_execute_status:
+      name: Include execute status
+      description: Include the raw execute capability status and extracted execute payload.
+      required: false
+      default: true
+      selector:
+        boolean:
+    execute_hrefs:
+      name: Execute hrefs
+      description: Optional hidden execute hrefs to request during the snapshot. Leave empty for a non-mutating status-only snapshot.
+      required: false
+      selector:
+        select:
+          multiple: true
+          custom_value: true
+          options:
+            - /sec/networkaudio/advancedaudio
+            - /sec/networkaudio/soundmode
+            - /sec/networkaudio/eq
+            - /sec/networkaudio/spacefitSound
+            - /sec/networkaudio/activeVoiceAmplifier
+            - /sec/networkaudio/woofer
+            - /sec/networkaudio/channelVolume
+            - /sec/networkaudio/surroundspeaker
+            - /sec/networkaudio/moderateBass
+            - /sec/networkaudio/virtual
+            - /sec/networkaudio/sync
+
 dump_local_rpc:
   name: Dump local RPC
   description: Probe the soundbar local JSON-RPC API over LAN. Requires the soundbar IP address and IP Control enabled in SmartThings.

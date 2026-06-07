@@ -56,8 +56,9 @@ class SoundbarImageEntity(ImageEntity):
     # ---------- GENERAL ---------------
     @property
     def entity_picture(self) -> str | None:
-        """Return a local proxy URL for real artwork or the no-artwork placeholder."""
-        self.__sync_image_state()
+        """Return a local proxy URL only for real artwork."""
+        if self.image_url is None:
+            return None
         return super().entity_picture
 
     @property
@@ -95,7 +96,7 @@ class SoundbarImageEntity(ImageEntity):
         if current is None:
             if not self.__using_placeholder:
                 self._cached_image = None
-                self.__updated = datetime.now()
+                self.__updated = None
                 self.__using_placeholder = True
             return
 

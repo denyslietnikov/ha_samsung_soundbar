@@ -49,6 +49,28 @@ _OPTIMISTIC_MUTE_TIMEOUT = datetime.timedelta(seconds=60)
 _OPTIMISTIC_SOUND_MODE_TIMEOUT = datetime.timedelta(seconds=60)
 _ARTWORK_RETRY_INTERVAL = datetime.timedelta(minutes=5)
 _ARTWORK_URL_KEY_HINTS = ("art", "cover", "image", "thumbnail")
+_GENERIC_SOUND_FROM_DETAIL_NAMES = {
+    "arc",
+    "bt",
+    "bluetooth",
+    "d.in",
+    "digital",
+    "e_arc",
+    "external device",
+    "hdmi",
+    "hdmi1",
+    "hdmi2",
+    "none",
+    "tv",
+    "tv arc",
+    "tv arc/earc",
+    "unknown",
+    "wifi",
+}
+_STREAMING_SOUND_FROM_ALIASES = {
+    "airplay": "AirPlay",
+    "spotify": "Spotify",
+}
 _LOCAL_SOURCE_TO_HA = {
     "HDMI_IN1": "HDMI1",
     "HDMI_IN2": "HDMI2",
@@ -142,6 +164,7 @@ class SoundbarDevice:
         self.__voice_amplifier = 0
         self.__night_mode = 0
         self.__bass_mode = 0
+        self.__virtual_sound = 0
         self.__advanced_audio_supported = False
 
         self.__media_title = ""
@@ -368,6 +391,74 @@ class SoundbarDevice:
     @staticmethod
     def __local_sound_mode_from_ha(sound_mode: str) -> str:
         return _HA_SOUND_MODE_TO_LOCAL.get(sound_mode, sound_mode.upper())
+
+    @staticmethod
+    def __status_key_name(key: Any) -> str:
+        return str(getattr(key, "value", key))
+
+    @staticmethod
+    def __status_value(status: Any) -> Any:
+        return getattr(status, "value", status)
+
+    def __status_attribute_values(self, attribute: str) -> list[Any]:
+        status = getattr(self.device, "status", None)
+        if status is None:
+            return []
+
+        values: list[Any] = []
+        components = getattr(status, "_components", None)
+        if isinstance(components, dict):
+            for capabilities in components.values():
+                if not isinstance(capabilities, dict):
+                    continue
+                for capability_status in capabilities.values():
+                    if not isinstance(capability_status, dict):
+                        continue
+                    for attribute_key, attribute_status in capability_status.items():
+                        if self.__status_key_name(attribute_key) == attribute:
+                            values.append(self.__status_value(attribute_status))
+
+        attributes = getattr(status, "attributes", None) or getattr(
+            status, "_attributes", None
+        )
+        if isinstance(attributes, dict) and attribute in attributes:
+            values.append(self.__status_value(attributes[attribute]))
+
+        return values
+
+    @classmethod
+    def __canonical_sound_from_detail(cls, detail_name: str) -> str:
+        normalized = detail_name.strip()
+        lower_name = normalized.lower()
+        for name_part, canonical_name in _STREAMING_SOUND_FROM_ALIASES.items():
+            if name_part in lower_name:
+                return canonical_name
+        return normalized
+
+    @classmethod
+    def __is_generic_sound_from_detail(cls, detail_name: str | None) -> bool:
+        normalized = cls.__clean_media_value(detail_name).lower()
+        return not normalized or normalized in _GENERIC_SOUND_FROM_DETAIL_NAMES
+
+    def __streaming_sound_from_detail_name(self) -> str | None:
+        candidates = [
+            self.__clean_media_value(value)
+            for value in self.__status_attribute_values("detailName")
+        ]
+
+        for candidate in candidates:
+            if not candidate:
+                continue
+            canonical = self.__canonical_sound_from_detail(candidate)
+            if canonical != candidate:
+                return canonical
+
+        for candidate in candidates:
+            if not candidate or self.__is_generic_sound_from_detail(candidate):
+                continue
+            return self.__canonical_sound_from_detail(candidate)
+
+        return None
 
     def remember_input_source(self, source: str | None) -> None:
         """Remember the last HA input source for off/unavailable local readback."""
@@ -668,6 +759,7 @@ class SoundbarDevice:
         self.__night_mode = payload["x.com.samsung.networkaudio.nightmode"]
         self.__bass_mode = payload["x.com.samsung.networkaudio.bassboost"]
         self.__voice_amplifier = payload["x.com.samsung.networkaudio.voiceamplifier"]
+        self.__virtual_sound = payload.get("x.com.samsung.networkaudio.virtual", 0)
         self.__advanced_audio_supported = True
 
     @property
@@ -959,7 +1051,13 @@ class SoundbarDevice:
 
     @property
     def sound_from_detail_name(self) -> str | None:
-        return self.device.status.sound_from_detail_name
+        detail_name = self.__clean_media_value(self.device.status.sound_from_detail_name)
+        streaming_detail_name = self.__streaming_sound_from_detail_name()
+        if streaming_detail_name is not None and self.__is_generic_sound_from_detail(
+            detail_name
+        ):
+            return streaming_detail_name
+        return detail_name or streaming_detail_name
 
     @property
     def sound_from_mode(self) -> int | None:
@@ -1115,6 +1213,18 @@ class SoundbarDevice:
         )
         self.__voice_amplifier = 1 if value else 0
 
+    @property
+    def virtual_sound(self) -> bool:
+        return True if self.__virtual_sound == 1 else False
+
+    async def set_virtual_sound(self, value: bool):
+        await self.set_custom_execution_data(
+            href="/sec/networkaudio/advancedaudio",
+            property="x.com.samsung.networkaudio.virtual",
+            value=1 if value else 0,
+        )
+        self.__virtual_sound = 1 if value else 0
+
     # ------------ EQUALIZER --------------
 
     @property
@@ -1208,7 +1318,12 @@ class SoundbarDevice:
 
     @property
     def media_app_name(self):
-        detail_status = self.device.status.attributes.get("detailName", None)
+        streaming_detail_name = self.__streaming_sound_from_detail_name()
+        if streaming_detail_name is not None:
+            return streaming_detail_name
+
+        attributes = getattr(self.device.status, "attributes", {})
+        detail_status = attributes.get("detailName", None)
         if detail_status is not None:
             return detail_status.value
         return None
@@ -1393,7 +1508,8 @@ class SoundbarDevice:
             },
             "volume": {"value": status.volume, "mute": status.mute},
             "sound_from": {
-                "detail_name": status.sound_from_detail_name,
+                "detail_name": self.sound_from_detail_name,
+                "raw_detail_name": status.sound_from_detail_name,
                 "mode": status.sound_from_mode,
             },
             "sound_mode": self.__status_capability_summary(
@@ -1446,6 +1562,128 @@ class SoundbarDevice:
             "non_null_paths": non_null_paths,
             "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
         }
+
+    async def async_dump_discovery_snapshot(
+        self,
+        include_null: bool = True,
+        include_raw_status: bool = False,
+        include_flattened_status: bool = True,
+        include_execute_status: bool = True,
+        execute_hrefs: Iterable[str] = (),
+        sleep_time: float = 0.3,
+    ) -> dict[str, Any]:
+        """Return raw/flattened SmartThings state for before-after discovery."""
+        await self.__call_smartthings(
+            self.device.status.refresh,
+            "refresh device status for discovery snapshot",
+        )
+        await self.__update_local_status()
+
+        status_data = await self.get_device_status_raw()
+        result: dict[str, Any] = {
+            "device_id": self.device_id,
+            "device_name": self.device_name,
+            "include_null": include_null,
+            "control_mode": self.control_mode,
+            "local": {
+                "available": self.local_available,
+                "last_error": self.local_last_error,
+                "status": self.__json_safe(self.__local_status),
+            },
+            "resolved": self.retrieve_data,
+            "q800f_ui_status": self.__q800f_ui_status_summary(),
+            "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+
+        if include_flattened_status:
+            result["flattened_status"] = self.__flatten_device_status(
+                status_data,
+                include_null=include_null,
+            )
+            result["non_null_paths"] = [
+                path
+                for path, status in result["flattened_status"].items()
+                if status.get("value") is not None
+            ]
+
+        if include_execute_status:
+            execute_status = await self.get_execute_status_raw()
+            result["execute_status"] = execute_status
+            result["execute_payload"] = self.__extract_execute_payload(execute_status)
+
+        if execute_hrefs:
+            result["execute_hrefs"] = await self.__dump_discovery_execute_hrefs(
+                execute_hrefs,
+                sleep_time=sleep_time,
+            )
+
+        if include_raw_status:
+            result["raw_status"] = status_data
+
+        return self.__json_safe(result)
+
+    async def __dump_discovery_execute_hrefs(
+        self,
+        execute_hrefs: Iterable[str],
+        sleep_time: float,
+    ) -> dict[str, Any]:
+        results: dict[str, Any] = {}
+        for href in execute_hrefs:
+            href_result: dict[str, Any] = {}
+            try:
+                command_result = await self.__post_execute_command_raw([href])
+                href_result["command_result"] = command_result
+                if command_result["status"] < 400:
+                    await asyncio.sleep(sleep_time)
+                    execute_status = await self.get_execute_status_raw()
+                    href_result["execute_status"] = execute_status
+                    href_result["execute_payload"] = self.__extract_execute_payload(
+                        execute_status
+                    )
+                    device_status = await self.get_device_status_raw()
+                    href_result["device_status_payload"] = (
+                        self.__extract_execute_payload_from_device_status(
+                            device_status,
+                            href,
+                        )
+                    )
+            except (ConfigEntryAuthFailed, ConfigEntryNotReady):
+                raise
+            except Exception as err:  # noqa: BLE001 - diagnostic dump should continue
+                log.exception(
+                    "[%s] Failed discovery execute href dump for device %s href %s",
+                    DOMAIN,
+                    self.device_name,
+                    href,
+                )
+                href_result["error"] = str(err)
+            results[href] = href_result
+        return results
+
+    @staticmethod
+    def __flatten_device_status(
+        status_data: dict[str, Any],
+        include_null: bool,
+    ) -> dict[str, dict[str, Any]]:
+        components = status_data.get("components")
+        if not isinstance(components, dict):
+            return {}
+
+        flattened: dict[str, dict[str, Any]] = {}
+        for component, capabilities in components.items():
+            if not isinstance(capabilities, dict):
+                continue
+            for capability, attributes in capabilities.items():
+                if not isinstance(attributes, dict):
+                    continue
+                for attribute, status in attributes.items():
+                    value = status.get("value") if isinstance(status, dict) else status
+                    if value is None and not include_null:
+                        continue
+                    flattened[f"{component}.{capability}.{attribute}"] = (
+                        SoundbarDevice.__summarize_status(status, value)
+                    )
+        return flattened
 
     @staticmethod
     def __summarize_component_status(
@@ -1834,6 +2072,7 @@ class SoundbarDevice:
                 "night_mode": self.night_mode,
                 "bass_mode": self.bass_mode,
                 "voice_amplifier": self.voice_amplifier,
+                "virtual": self.virtual_sound,
             },
             "equalizer": {
                 "active_preset": self.active_equalizer_preset,

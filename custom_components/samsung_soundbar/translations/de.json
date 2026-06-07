@@ -26,7 +26,7 @@
             },
             "reconfigure_confirm":{
                 "data" : {
-                    "settings_advanced_audio": "'Advanced Audio switches' aktivieren (NightMode, BassMode, VoiceEnhancer)",
+                    "settings_advanced_audio": "'Advanced Audio switches' aktivieren (NightMode, BassMode, VoiceEnhancer, Virtual)",
                     "settings_eq": "'EQ selector' aktivieren",
                     "settings_soundmode": "'Soundmode selector' aktivieren",
                     "settings_woofer": "'Subwoofer Entität' aktivieren",
@@ -63,7 +63,7 @@
                     "local_verify_ssl": "Lokales SSL Zertifikat prüfen",
                     "local_timeout": "Lokales RPC Timeout",
                     "local_fallback_to_cloud": "Bei lokalem RPC Fehler auf SmartThings Cloud zurückfallen",
-                    "settings_advanced_audio": "Advanced Audio Switches aktivieren (Nachtmodus, Bassmodus, Stimmenverstärker)",
+                    "settings_advanced_audio": "Advanced Audio Switches aktivieren (Nachtmodus, Bassmodus, Stimmenverstärker, Virtual)",
                     "settings_eq": "EQ Selector aktivieren",
                     "settings_soundmode": "SoundMode Selector aktivieren",
                     "settings_woofer": "Subwoofer Number Entity aktivieren",
@@ -226,6 +226,36 @@
             "include_null":{
                 "name": "Null-Werte einbeziehen",
                 "description": "Capabilities und Attribute mit null-Wert einbeziehen."
+            }
+        }
+    },
+    "dump_discovery_snapshot":{
+        "name": "Discovery Snapshot ausgeben",
+        "description": "Rohe und flache SmartThings Statusdaten für Before/After Diagnose zurückgeben.",
+        "fields":{
+            "device_id":{
+                "name": "Gerät",
+                "description": "Samsung Soundbar Gerät. Nur erforderlich, wenn mehrere Soundbars geladen sind."
+            },
+            "include_null":{
+                "name": "Null-Werte einbeziehen",
+                "description": "Capabilities und Attribute mit null-Wert einbeziehen."
+            },
+            "include_raw_status":{
+                "name": "Rohen Status einbeziehen",
+                "description": "Vollständige rohe /status Antwort einbeziehen. Diese kann groß sein."
+            },
+            "include_flattened_status":{
+                "name": "Flachen Status einbeziehen",
+                "description": "Dot-Path Statuswerte einbeziehen, die vor und nach einer Änderung leichter vergleichbar sind."
+            },
+            "include_execute_status":{
+                "name": "Execute Status einbeziehen",
+                "description": "Rohen execute Capability Status und extrahierten execute Payload einbeziehen."
+            },
+            "execute_hrefs":{
+                "name": "Execute hrefs",
+                "description": "Optionale hidden execute hrefs während des Snapshots abfragen. Leer lassen für einen nicht verändernden Status-Snapshot."
             }
         }
     }

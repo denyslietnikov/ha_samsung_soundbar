@@ -35,11 +35,19 @@ CONTROL_MODES = (
     CONTROL_MODE_SMARTTHINGS_CLOUD,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
 )
+CONTROL_MODE_LABELS = {
+    CONTROL_MODE_SMARTTHINGS_CLOUD: "Smartthings Cloud",
+    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS: "Hybrid Local + SmartThings",
+}
 
 SERVICE_DUMP_EXECUTE_PAYLOAD = "dump_execute_payload"
+SERVICE_DUMP_DISCOVERY_SNAPSHOT = "dump_discovery_snapshot"
 SERVICE_DUMP_LOCAL_RPC = "dump_local_rpc"
 SERVICE_DUMP_STATUS_SUMMARY = "dump_status_summary"
+CONF_EXECUTE_HREFS = "execute_hrefs"
 CONF_HREF = "href"
+CONF_INCLUDE_EXECUTE_STATUS = "include_execute_status"
+CONF_INCLUDE_FLATTENED_STATUS = "include_flattened_status"
 CONF_LOCAL_RPC_HOST = "host"
 CONF_LOCAL_RPC_METHODS = "methods"
 CONF_LOCAL_RPC_PORT = "port"
@@ -48,6 +56,7 @@ CONF_LOCAL_RPC_VERIFY_SSL = "verify_ssl"
 CONF_LOCAL_RPC_WRITE_METHOD = "write_method"
 CONF_LOCAL_RPC_WRITE_PARAMS = "write_params"
 CONF_INCLUDE_NULL = "include_null"
+CONF_INCLUDE_RAW_STATUS = "include_raw_status"
 CONF_PRESET = "preset"
 CONF_WRITE_PROPERTY = "write_property"
 CONF_WRITE_VALUE = "write_value"

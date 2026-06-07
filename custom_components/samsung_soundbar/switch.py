@@ -13,6 +13,7 @@ SWITCH_ENTITY_NAMES = {
     "bassmode": "Bassmode",
     "nightmode": "Nightmode",
     "voice_amplifier": "Voice Amplifier",
+    "virtual": "Virtual",
 }
 
 
@@ -54,6 +55,16 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     device.set_voice_amplifier,
                     device.set_voice_amplifier,
                     "mdi:account-voice",
+                )
+            )
+            entities.append(
+                SoundbarSwitchAdvancedAudio(
+                    device,
+                    "virtual",
+                    lambda: device.virtual_sound,
+                    device.set_virtual_sound,
+                    device.set_virtual_sound,
+                    "mdi:surround-sound",
                 )
             )
     async_add_entities(entities)

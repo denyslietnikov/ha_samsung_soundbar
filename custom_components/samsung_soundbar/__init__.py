@@ -34,11 +34,15 @@ from .const import (
     CONF_ENTRY_SETTINGS_EQ_SELECTOR,
     CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
     CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
+    CONF_EXECUTE_HREFS,
     CONF_LOCAL_FALLBACK_TO_CLOUD,
     CONF_LOCAL_HOST,
     CONF_LOCAL_PORT,
     CONF_HREF,
+    CONF_INCLUDE_EXECUTE_STATUS,
+    CONF_INCLUDE_FLATTENED_STATUS,
     CONF_INCLUDE_NULL,
+    CONF_INCLUDE_RAW_STATUS,
     CONF_LOCAL_TIMEOUT,
     CONF_LOCAL_VERIFY_SSL,
     CONF_LOCAL_RPC_HOST,
@@ -54,6 +58,7 @@ from .const import (
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
     DOMAIN,
     EXECUTE_PAYLOAD_PRESETS,
+    SERVICE_DUMP_DISCOVERY_SNAPSHOT,
     SERVICE_DUMP_EXECUTE_PAYLOAD,
     SERVICE_DUMP_LOCAL_RPC,
     SERVICE_DUMP_STATUS_SUMMARY,
@@ -86,6 +91,17 @@ DUMP_STATUS_SUMMARY_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_HA_DEVICE_ID): cv.string,
         vol.Optional(CONF_INCLUDE_NULL, default=False): cv.boolean,
+    }
+)
+
+DUMP_DISCOVERY_SNAPSHOT_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_HA_DEVICE_ID): cv.string,
+        vol.Optional(CONF_INCLUDE_NULL, default=True): cv.boolean,
+        vol.Optional(CONF_INCLUDE_RAW_STATUS, default=False): cv.boolean,
+        vol.Optional(CONF_INCLUDE_FLATTENED_STATUS, default=True): cv.boolean,
+        vol.Optional(CONF_INCLUDE_EXECUTE_STATUS, default=True): cv.boolean,
+        vol.Optional(CONF_EXECUTE_HREFS): vol.All(cv.ensure_list, [cv.string]),
     }
 )
 
@@ -246,6 +262,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
         if domain_data:
             domain_data.devices.pop(entry.data.get(CONF_ENTRY_DEVICE_ID), None)
             if not domain_data.devices:
+                hass.services.async_remove(DOMAIN, SERVICE_DUMP_DISCOVERY_SNAPSHOT)
                 hass.services.async_remove(DOMAIN, SERVICE_DUMP_EXECUTE_PAYLOAD)
                 hass.services.async_remove(DOMAIN, SERVICE_DUMP_LOCAL_RPC)
                 hass.services.async_remove(DOMAIN, SERVICE_DUMP_STATUS_SUMMARY)
@@ -275,6 +292,15 @@ def _async_register_services(hass: HomeAssistant) -> None:
             SERVICE_DUMP_STATUS_SUMMARY,
             _async_create_dump_status_summary_service(hass),
             schema=DUMP_STATUS_SUMMARY_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_DUMP_DISCOVERY_SNAPSHOT):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_DUMP_DISCOVERY_SNAPSHOT,
+            _async_create_dump_discovery_snapshot_service(hass),
+            schema=DUMP_DISCOVERY_SNAPSHOT_SCHEMA,
             supports_response=SupportsResponse.OPTIONAL,
         )
 
@@ -345,6 +371,30 @@ def _async_create_dump_status_summary_service(hass: HomeAssistant):
         )
 
     return async_dump_status_summary
+
+
+def _async_create_dump_discovery_snapshot_service(hass: HomeAssistant):
+    """Create the raw discovery snapshot service handler."""
+
+    async def async_dump_discovery_snapshot(call: ServiceCall) -> ServiceResponse:
+        domain_config: SoundbarConfig | None = hass.data.get(DOMAIN)
+        if domain_config is None or not domain_config.devices:
+            raise HomeAssistantError("No Samsung Soundbar devices are loaded")
+
+        soundbar_device = _async_resolve_service_device(
+            hass,
+            domain_config,
+            call.data.get(CONF_HA_DEVICE_ID),
+        )
+        return await soundbar_device.async_dump_discovery_snapshot(
+            include_null=call.data[CONF_INCLUDE_NULL],
+            include_raw_status=call.data[CONF_INCLUDE_RAW_STATUS],
+            include_flattened_status=call.data[CONF_INCLUDE_FLATTENED_STATUS],
+            include_execute_status=call.data[CONF_INCLUDE_EXECUTE_STATUS],
+            execute_hrefs=call.data.get(CONF_EXECUTE_HREFS) or (),
+        )
+
+    return async_dump_discovery_snapshot
 
 
 def _async_create_dump_local_rpc_service(hass: HomeAssistant):
