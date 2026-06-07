@@ -23,10 +23,6 @@ LOCAL_SOUND_MODE_VALUES = (
     "SURROUND",
     "GAME",
     "ADAPTIVE",
-    "MOVIE",
-    "MUSIC",
-    "CLEARVOICE",
-    "DTS_VIRTUAL_X",
 )
 
 

@@ -46,6 +46,7 @@ _TRANSIENT_ERROR_STATUSES = {
     524,
 }
 _OPTIMISTIC_MUTE_TIMEOUT = datetime.timedelta(seconds=60)
+_OPTIMISTIC_SOUND_MODE_TIMEOUT = datetime.timedelta(seconds=60)
 _ARTWORK_RETRY_INTERVAL = datetime.timedelta(minutes=5)
 _ARTWORK_URL_KEY_HINTS = ("art", "cover", "image", "thumbnail")
 _LOCAL_SOURCE_TO_HA = {
@@ -72,7 +73,8 @@ _HA_SOURCE_TO_LOCAL = {
 _LOCAL_SOUND_MODE_TO_HA = {
     "STANDARD": "Standard",
     "SURROUND": "Surround",
-    "GAME": "Game",
+    "GAME": "Game Pro",
+    "GAME_PRO": "Game Pro",
     "ADAPTIVE": "Adaptive Sound",
     "MOVIE": "Movie",
     "MUSIC": "Music",
@@ -83,6 +85,9 @@ _HA_SOUND_MODE_TO_LOCAL = {
     **{value: key for key, value in _LOCAL_SOUND_MODE_TO_HA.items()},
     **{value.upper(): value for value in LOCAL_SOUND_MODE_VALUES},
     "ADAPTIVE SOUND": "ADAPTIVE",
+    "Game Pro": "GAME",
+    "GAME PRO": "GAME",
+    "Game": "GAME",
     "CLEAR VOICE": "CLEARVOICE",
     "DTS VIRTUAL X": "DTS_VIRTUAL_X",
 }
@@ -149,6 +154,8 @@ class SoundbarDevice:
         self.__unsupported_execute_payload_hrefs: set[str] = set()
         self.__optimistic_mute: bool | None = None
         self.__optimistic_mute_updated_at: datetime.datetime | None = None
+        self.__optimistic_sound_mode: str | None = None
+        self.__optimistic_sound_mode_updated_at: datetime.datetime | None = None
 
         self.__max_volume = max_volume
 
@@ -247,9 +254,21 @@ class SoundbarDevice:
             return
 
         try:
-            self.__local_status = await self.__local_rpc.status()
+            local_status = await self.__local_rpc.status()
+            sound_mode_readback_missing = False
+            if (
+                self.__optimistic_sound_mode is not None
+                and not self.__normalize_local_value(local_status.get("sound_mode"))
+            ):
+                local_status["sound_mode"] = self.__optimistic_sound_mode
+                sound_mode_readback_missing = True
+            self.__local_status = local_status
             self.__local_available = True
             self.__local_last_error = None
+            if sound_mode_readback_missing:
+                self.__expire_optimistic_sound_mode()
+            else:
+                self.__sync_optimistic_sound_mode()
         except LocalRpcError as err:
             self.__local_available = False
             self.__local_last_error = str(err)
@@ -294,7 +313,15 @@ class SoundbarDevice:
         if not self.hybrid_mode or not self.__local_available:
             return None
         value = self.__local_status.get(key)
-        return value if value not in ("", None) else None
+        return self.__normalize_local_value(value)
+
+    @staticmethod
+    def __normalize_local_value(value: Any) -> Any:
+        if value in ("", None):
+            return None
+        if isinstance(value, str) and value.strip().lower() == "unknown":
+            return None
+        return value
 
     @staticmethod
     def __ha_source_from_local(source: str | None) -> str | None:
@@ -812,6 +839,36 @@ class SoundbarDevice:
             self.__optimistic_mute = None
             self.__optimistic_mute_updated_at = None
 
+    def __set_optimistic_sound_mode(self, sound_mode: str) -> None:
+        self.__optimistic_sound_mode = sound_mode
+        self.__optimistic_sound_mode_updated_at = datetime.datetime.now()
+
+    def __sync_optimistic_sound_mode(self) -> None:
+        if self.__optimistic_sound_mode is None:
+            return
+
+        local_sound_mode = self.__normalize_local_value(
+            self.__local_status.get("sound_mode")
+        )
+        if local_sound_mode == self.__optimistic_sound_mode:
+            self.__optimistic_sound_mode = None
+            self.__optimistic_sound_mode_updated_at = None
+            return
+
+        self.__expire_optimistic_sound_mode()
+
+    def __expire_optimistic_sound_mode(self) -> None:
+        if self.__optimistic_sound_mode is None:
+            return
+
+        if (
+            self.__optimistic_sound_mode_updated_at is not None
+            and datetime.datetime.now() - self.__optimistic_sound_mode_updated_at
+            > _OPTIMISTIC_SOUND_MODE_TIMEOUT
+        ):
+            self.__optimistic_sound_mode = None
+            self.__optimistic_sound_mode_updated_at = None
+
     async def volume_up(self):
         if await self.__try_local_rpc(lambda local: local.volume_up(), "volume up"):
             return
@@ -939,7 +996,9 @@ class SoundbarDevice:
         local_sound_mode = self.__local_value("sound_mode")
         if local_sound_mode is not None:
             return self.__ha_sound_mode_from_local(local_sound_mode)
-        return self.__active_soundmode
+        if self.__optimistic_sound_mode is not None:
+            return self.__ha_sound_mode_from_local(self.__optimistic_sound_mode)
+        return self.__active_soundmode or None
 
     @property
     def supported_soundmodes(self):
@@ -963,6 +1022,7 @@ class SoundbarDevice:
                 "select sound mode",
             ):
                 self.__local_status["sound_mode"] = local_sound_mode
+                self.__set_optimistic_sound_mode(local_sound_mode)
                 return
 
         await self.set_custom_execution_data(
