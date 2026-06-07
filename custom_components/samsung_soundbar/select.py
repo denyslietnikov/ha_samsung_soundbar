@@ -155,6 +155,7 @@ class SoundModeSelectEntity(SelectEntity):
         """Set the option."""
 
         await self.__device.select_sound_mode(option)
+        self.async_write_ha_state()
 
 
 class InputSelectEntity(SelectEntity):
@@ -207,3 +208,4 @@ class InputSelectEntity(SelectEntity):
         """Set the option."""
 
         await self.__device.select_source(option)
+        self.async_write_ha_state()

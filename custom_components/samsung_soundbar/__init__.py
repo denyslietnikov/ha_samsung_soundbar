@@ -26,6 +26,7 @@ from .api_extension.SoundbarDevice import SoundbarDevice
 from .api_extension.smartthings_compat import ensure_device_entity
 from .auth import SmartThingsAuthProvider
 from .const import (
+    CONF_CONTROL_MODE,
     CONF_ENTRY_DEVICE_ID,
     CONF_ENTRY_MAX_VOLUME,
     CONF_ENTRY_DEVICE_NAME,
@@ -33,8 +34,13 @@ from .const import (
     CONF_ENTRY_SETTINGS_EQ_SELECTOR,
     CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
     CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
+    CONF_LOCAL_FALLBACK_TO_CLOUD,
+    CONF_LOCAL_HOST,
+    CONF_LOCAL_PORT,
     CONF_HREF,
     CONF_INCLUDE_NULL,
+    CONF_LOCAL_TIMEOUT,
+    CONF_LOCAL_VERIFY_SSL,
     CONF_LOCAL_RPC_HOST,
     CONF_LOCAL_RPC_METHODS,
     CONF_LOCAL_RPC_PORT,
@@ -45,6 +51,7 @@ from .const import (
     CONF_PRESET,
     CONF_WRITE_PROPERTY,
     CONF_WRITE_VALUE,
+    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
     DOMAIN,
     EXECUTE_PAYLOAD_PRESETS,
     SERVICE_DUMP_EXECUTE_PAYLOAD,
@@ -178,6 +185,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise
 
         session = async_get_clientsession(hass)
+        control_mode = get_entry_option(entry, CONF_CONTROL_MODE)
+        local_rpc_client = None
+        if control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS:
+            local_host = str(get_entry_option(entry, CONF_LOCAL_HOST)).strip()
+            if local_host:
+                local_verify_ssl = get_entry_option(entry, CONF_LOCAL_VERIFY_SSL)
+                local_rpc_client = LocalSoundbarRpcClient(
+                    local_host,
+                    async_get_clientsession(hass, verify_ssl=local_verify_ssl),
+                    port=get_entry_option(entry, CONF_LOCAL_PORT),
+                    verify_ssl=local_verify_ssl,
+                    timeout=get_entry_option(entry, CONF_LOCAL_TIMEOUT),
+                )
 
         soundbar_device = SoundbarDevice(
             device=smart_things_device,
@@ -195,6 +215,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
             ),
             enable_woofer=get_entry_option(entry, CONF_ENTRY_SETTINGS_WOOFER_NUMBER),
+            control_mode=control_mode,
+            local_rpc=local_rpc_client,
+            local_fallback_to_cloud=get_entry_option(
+                entry,
+                CONF_LOCAL_FALLBACK_TO_CLOUD,
+            ),
         )
 
         await soundbar_device.update()

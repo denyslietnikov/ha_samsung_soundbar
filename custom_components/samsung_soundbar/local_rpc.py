@@ -18,6 +18,16 @@ DEFAULT_LOCAL_RPC_METHODS = (
     "getCodec",
     "getIdentifier",
 )
+LOCAL_SOUND_MODE_VALUES = (
+    "STANDARD",
+    "SURROUND",
+    "GAME",
+    "ADAPTIVE",
+    "MOVIE",
+    "MUSIC",
+    "CLEARVOICE",
+    "DTS_VIRTUAL_X",
+)
 
 
 class LocalRpcError(Exception):
@@ -152,6 +162,98 @@ class LocalSoundbarRpcClient:
             await self.create_token()
             request_params["AccessToken"] = self._token
             return await self._post(self._payload(method, request_params))
+
+    async def power_on(self) -> None:
+        await self.call("powerControl", {"power": "powerOn"})
+
+    async def power_off(self) -> None:
+        await self.call("powerControl", {"power": "powerOff"})
+
+    async def remote_key(self, remote_key: str) -> None:
+        await self.call("remoteKeyControl", {"remoteKey": remote_key})
+
+    async def volume_up(self) -> None:
+        await self.remote_key("VOL_UP")
+
+    async def volume_down(self) -> None:
+        await self.remote_key("VOL_DOWN")
+
+    async def mute_toggle(self) -> None:
+        await self.remote_key("MUTE")
+
+    async def set_volume(self, level: int) -> None:
+        if not 0 <= level <= 100:
+            raise ValueError("Volume has to be in range 0-100")
+
+        try:
+            await self.call("setVolume", {"volume": level})
+            return
+        except LocalRpcError:
+            pass
+
+        current = await self.volume()
+        while current != level:
+            if current < level:
+                await self.volume_up()
+                current += 1
+            else:
+                await self.volume_down()
+                current -= 1
+
+    async def select_input(self, source: str) -> None:
+        await self.call("inputSelectControl", {"inputSource": source})
+
+    async def set_sound_mode(self, sound_mode: str) -> None:
+        await self.call("soundModeControl", {"soundMode": sound_mode})
+
+    async def power_state(self) -> str | None:
+        value = (await self.call("powerControl")).get("power")
+        return str(value) if value is not None else None
+
+    async def volume(self) -> int:
+        value = (await self.call("getVolume")).get("volume")
+        return int(value)
+
+    async def is_muted(self) -> bool:
+        return bool((await self.call("getMute")).get("mute"))
+
+    async def input_source(self) -> str | None:
+        value = (await self.call("inputSelectControl")).get("inputSource")
+        return str(value) if value is not None else None
+
+    async def sound_mode(self) -> str | None:
+        value = (await self.call("soundModeControl")).get("soundMode")
+        return str(value) if value is not None else None
+
+    async def codec(self) -> str | None:
+        value = (await self.call("getCodec")).get("codec")
+        return str(value) if value is not None else None
+
+    async def identifier(self) -> str | None:
+        value = (await self.call("getIdentifier")).get("identifier")
+        return str(value) if value is not None else None
+
+    async def status(self) -> dict[str, Any]:
+        power, volume, mute, source, sound_mode, codec, identifier = (
+            await asyncio.gather(
+                self.power_state(),
+                self.volume(),
+                self.is_muted(),
+                self.input_source(),
+                self.sound_mode(),
+                self.codec(),
+                self.identifier(),
+            )
+        )
+        return {
+            "power": power,
+            "volume": volume,
+            "mute": mute,
+            "input_source": source,
+            "sound_mode": sound_mode,
+            "codec": codec,
+            "identifier": identifier,
+        }
 
     @staticmethod
     def _redact_token(token: str) -> str:

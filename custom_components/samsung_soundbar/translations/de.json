@@ -50,9 +50,19 @@
         }
     },
     "options": {
+        "error": {
+            "cannot_connect": "Verbindung zur lokalen Soundbar RPC API fehlgeschlagen. Prüfe IP Adresse, Port, Netzwerk und die IP Control Einstellung.",
+            "required": "Dieses Feld ist für den ausgewählten Steuerungsmodus erforderlich."
+        },
         "step": {
             "init": {
                 "data": {
+                    "control_mode": "Steuerungsmodus",
+                    "local_host": "Lokaler Soundbar Host/IP",
+                    "local_port": "Lokaler RPC Port",
+                    "local_verify_ssl": "Lokales SSL Zertifikat prüfen",
+                    "local_timeout": "Lokales RPC Timeout",
+                    "local_fallback_to_cloud": "Bei lokalem RPC Fehler auf SmartThings Cloud zurückfallen",
                     "settings_advanced_audio": "Advanced Audio Switches aktivieren (Nachtmodus, Bassmodus, Stimmenverstärker)",
                     "settings_eq": "EQ Selector aktivieren",
                     "settings_soundmode": "SoundMode Selector aktivieren",
