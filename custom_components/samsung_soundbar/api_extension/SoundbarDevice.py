@@ -156,6 +156,8 @@ class SoundbarDevice:
         self.__optimistic_mute_updated_at: datetime.datetime | None = None
         self.__optimistic_sound_mode: str | None = None
         self.__optimistic_sound_mode_updated_at: datetime.datetime | None = None
+        self.__last_known_input_source: str | None = None
+        self.__last_known_sound_mode: str | None = None
 
         self.__max_volume = max_volume
 
@@ -256,6 +258,30 @@ class SoundbarDevice:
         try:
             local_status = await self.__local_rpc.status()
             sound_mode_readback_missing = False
+            local_input_source = self.__normalize_local_value(
+                local_status.get("input_source")
+            )
+            if local_input_source is not None:
+                self.__last_known_input_source = self.__ha_source_from_local(
+                    local_input_source
+                )
+            elif self.__last_known_input_source is not None:
+                local_status["input_source"] = self.__local_source_from_ha(
+                    self.__last_known_input_source
+                )
+
+            local_sound_mode = self.__normalize_local_value(
+                local_status.get("sound_mode")
+            )
+            if local_sound_mode is not None:
+                self.__last_known_sound_mode = local_sound_mode
+            elif self.__last_known_sound_mode is not None:
+                local_status["sound_mode"] = self.__last_known_sound_mode
+                sound_mode_readback_missing = True
+            elif self.__optimistic_sound_mode is not None:
+                local_status["sound_mode"] = self.__optimistic_sound_mode
+                sound_mode_readback_missing = True
+
             if (
                 self.__optimistic_sound_mode is not None
                 and not self.__normalize_local_value(local_status.get("sound_mode"))
@@ -342,6 +368,18 @@ class SoundbarDevice:
     @staticmethod
     def __local_sound_mode_from_ha(sound_mode: str) -> str:
         return _HA_SOUND_MODE_TO_LOCAL.get(sound_mode, sound_mode.upper())
+
+    def remember_input_source(self, source: str | None) -> None:
+        """Remember the last HA input source for off/unavailable local readback."""
+        if self.__normalize_local_value(source) is None:
+            return
+        self.__last_known_input_source = source
+
+    def remember_sound_mode(self, sound_mode: str | None) -> None:
+        """Remember the last HA sound mode for off/unavailable local readback."""
+        if self.__normalize_local_value(sound_mode) is None:
+            return
+        self.__last_known_sound_mode = self.__local_sound_mode_from_ha(sound_mode)
 
     async def _update_media(self):
         audio_track_status = self.device.status._attributes.get("audioTrackData")
@@ -912,10 +950,12 @@ class SoundbarDevice:
         local_source = self.__local_value("input_source")
         if local_source is not None:
             return self.__ha_source_from_local(local_source)
+        if self.__last_known_input_source is not None:
+            return self.__last_known_input_source
 
         if self.media_app_name in ("AirPlay", "Spotify"):
             return "WIFI"
-        return self.device.status.input_source
+        return self.__normalize_local_value(self.device.status.input_source)
 
     @property
     def sound_from_detail_name(self) -> str | None:
@@ -972,6 +1012,9 @@ class SoundbarDevice:
                 "select input source",
             ):
                 self.__local_status["input_source"] = local_source
+                self.__last_known_input_source = self.__ha_source_from_local(
+                    local_source
+                )
                 return
 
             if not self.__can_select_source_cloud():
@@ -998,6 +1041,8 @@ class SoundbarDevice:
             return self.__ha_sound_mode_from_local(local_sound_mode)
         if self.__optimistic_sound_mode is not None:
             return self.__ha_sound_mode_from_local(self.__optimistic_sound_mode)
+        if self.__last_known_sound_mode is not None:
+            return self.__ha_sound_mode_from_local(self.__last_known_sound_mode)
         return self.__active_soundmode or None
 
     @property
@@ -1022,6 +1067,7 @@ class SoundbarDevice:
                 "select sound mode",
             ):
                 self.__local_status["sound_mode"] = local_sound_mode
+                self.__last_known_sound_mode = local_sound_mode
                 self.__set_optimistic_sound_mode(local_sound_mode)
                 return
 
