@@ -517,7 +517,11 @@ class SoundbarDevice:
 
     @property
     def can_control_advanced_audio(self) -> bool:
-        return bool(self.__enable_advanced_audio and self.__advanced_audio_supported)
+        return self.__enable_advanced_audio
+
+    @property
+    def has_advanced_audio_state(self) -> bool:
+        return self.__advanced_audio_supported
 
     # ------------ ON / OFF ------------
 

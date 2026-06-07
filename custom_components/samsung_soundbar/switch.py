@@ -95,7 +95,8 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
         return self._name
 
     async def async_update(self):
-        self.__state = self.__state_function()
+        if self.__device.has_advanced_audio_state:
+            self.__state = self.__state_function()
 
     @property
     def icon(self) -> str | None:
@@ -103,13 +104,15 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
 
     # ------ STATE FUNCTIONS --------
     @property
-    def state(self):
-        return "on" if self.__state else "off"
+    def is_on(self) -> bool:
+        return bool(self.__state)
 
     async def async_turn_off(self):
         await self.__off_function(False)
-        self.__state = "off"
+        self.__state = False
+        self.async_write_ha_state()
 
     async def async_turn_on(self):
         await self.__on_function(True)
-        self.__state = "on"
+        self.__state = True
+        self.async_write_ha_state()
