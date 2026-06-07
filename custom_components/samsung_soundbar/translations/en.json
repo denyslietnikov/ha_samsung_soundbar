@@ -194,6 +194,14 @@
                 "href": {
                     "name": "Href",
                     "description": "Custom execute href, for example /sec/networkaudio/advancedaudio."
+                },
+                "write_property": {
+                    "name": "Write probe property",
+                    "description": "Optional explicit write probe property. Requires href and write_value. This may change the soundbar setting."
+                },
+                "write_value": {
+                    "name": "Write probe value",
+                    "description": "Optional explicit write probe value. Used only with write_property and href. This may change the soundbar setting."
                 }
             }
         },

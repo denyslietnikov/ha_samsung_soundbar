@@ -898,11 +898,14 @@ class SoundbarDevice:
         hrefs: Iterable[str],
         sleep_time: float = 0.3,
         max_retries: int = 10,
+        write_probe: tuple[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Request execute hrefs and return raw payloads for diagnostics."""
         payloads: dict[str, Any] = {}
         errors: dict[str, str] = {}
         command_results: dict[str, Any] = {}
+        write_probe_results: dict[str, Any] = {}
+        write_probe_raw_statuses: dict[str, Any] = {}
         raw_statuses: dict[str, Any] = {}
         raw_device_statuses: dict[str, Any] = {}
 
@@ -945,6 +948,13 @@ class SoundbarDevice:
                         "execute status did not return payload "
                         f"after {max_retries + 1} polling attempts"
                     )
+                    await self.__run_execute_write_probe(
+                        href,
+                        write_probe,
+                        write_probe_results,
+                        write_probe_raw_statuses,
+                        sleep_time,
+                    )
                     continue
 
             payloads[href] = payload
@@ -956,17 +966,81 @@ class SoundbarDevice:
                 payload,
             )
 
+            await self.__run_execute_write_probe(
+                href,
+                write_probe,
+                write_probe_results,
+                write_probe_raw_statuses,
+                sleep_time,
+            )
+
         self.__last_execute_payload_dump = {
             "device_id": self.device_id,
             "device_name": self.device_name,
             "payloads": payloads,
             "errors": errors,
             "command_results": command_results,
+            "write_probe": (
+                None
+                if write_probe is None
+                else {"property": write_probe[0], "value": write_probe[1]}
+            ),
+            "write_probe_results": write_probe_results,
+            "write_probe_raw_statuses": write_probe_raw_statuses,
+            "q800f_ui_status": self.__q800f_ui_status_summary(),
             "raw_statuses": raw_statuses,
             "raw_device_statuses": raw_device_statuses,
             "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
         }
         return self.__last_execute_payload_dump
+
+    async def __run_execute_write_probe(
+        self,
+        href: str,
+        write_probe: tuple[str, Any] | None,
+        write_probe_results: dict[str, Any],
+        write_probe_raw_statuses: dict[str, Any],
+        sleep_time: float,
+    ) -> None:
+        if write_probe is None:
+            return
+
+        write_property, write_value = write_probe
+        write_probe_results[href] = await self.__post_execute_command_raw(
+            [href, {write_property: write_value}],
+        )
+        await asyncio.sleep(sleep_time)
+        write_probe_raw_statuses[href] = await self.get_execute_status_raw()
+
+    def __q800f_ui_status_summary(self) -> dict[str, Any]:
+        status = self.device.status
+        return {
+            "source": {
+                "value": status.input_source,
+                "supported_sources": status.supported_input_sources,
+                "writable": getattr(self.device, "can_set_input_source", False),
+            },
+            "volume": {"value": status.volume, "mute": status.mute},
+            "sound_from": {
+                "detail_name": status.sound_from_detail_name,
+                "mode": status.sound_from_mode,
+            },
+            "sound_mode": self.__status_capability_summary(
+                "samsungvd.audioSoundMode",
+                ("soundMode", "supportedSoundModes"),
+            ),
+            "execute": self.__status_capability_summary("execute", ("data",)),
+        }
+
+    def __status_capability_summary(
+        self,
+        capability: str,
+        attributes: tuple[str, ...],
+    ) -> dict[str, Any]:
+        return {
+            attribute: self.device.status._value(capability, attribute)
+            for attribute in attributes
+        }
 
     @property
     def last_execute_payload_dump(self) -> dict[str, Any] | None:

@@ -35,13 +35,30 @@ from .const import (
     CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
     CONF_HREF,
     CONF_INCLUDE_NULL,
+    CONF_LOCAL_RPC_HOST,
+    CONF_LOCAL_RPC_METHODS,
+    CONF_LOCAL_RPC_PORT,
+    CONF_LOCAL_RPC_TIMEOUT,
+    CONF_LOCAL_RPC_VERIFY_SSL,
+    CONF_LOCAL_RPC_WRITE_METHOD,
+    CONF_LOCAL_RPC_WRITE_PARAMS,
     CONF_PRESET,
+    CONF_WRITE_PROPERTY,
+    CONF_WRITE_VALUE,
     DOMAIN,
     EXECUTE_PAYLOAD_PRESETS,
     SERVICE_DUMP_EXECUTE_PAYLOAD,
+    SERVICE_DUMP_LOCAL_RPC,
     SERVICE_DUMP_STATUS_SUMMARY,
 )
 from .entry_options import get_entry_option
+from .local_rpc import (
+    DEFAULT_LOCAL_RPC_METHODS,
+    DEFAULT_LOCAL_RPC_PORT,
+    DEFAULT_LOCAL_RPC_TIMEOUT,
+    LocalRpcError,
+    LocalSoundbarRpcClient,
+)
 from .models import DeviceConfig, SoundbarConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,6 +70,8 @@ DUMP_EXECUTE_PAYLOAD_SCHEMA = vol.Schema(
         vol.Optional(CONF_HA_DEVICE_ID): cv.string,
         vol.Optional(CONF_HREF): cv.string,
         vol.Optional(CONF_PRESET, default="all"): vol.In(EXECUTE_PAYLOAD_PRESETS),
+        vol.Optional(CONF_WRITE_PROPERTY): cv.string,
+        vol.Optional(CONF_WRITE_VALUE): vol.Any(str, int, float, bool, dict, list),
     }
 )
 
@@ -60,6 +79,27 @@ DUMP_STATUS_SUMMARY_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_HA_DEVICE_ID): cv.string,
         vol.Optional(CONF_INCLUDE_NULL, default=False): cv.boolean,
+    }
+)
+
+DUMP_LOCAL_RPC_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_LOCAL_RPC_HOST): cv.string,
+        vol.Optional(
+            CONF_LOCAL_RPC_PORT,
+            default=DEFAULT_LOCAL_RPC_PORT,
+        ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+        vol.Optional(
+            CONF_LOCAL_RPC_VERIFY_SSL,
+            default=False,
+        ): cv.boolean,
+        vol.Optional(
+            CONF_LOCAL_RPC_TIMEOUT,
+            default=DEFAULT_LOCAL_RPC_TIMEOUT,
+        ): vol.All(vol.Coerce(float), vol.Range(min=1, max=60)),
+        vol.Optional(CONF_LOCAL_RPC_METHODS): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional(CONF_LOCAL_RPC_WRITE_METHOD): cv.string,
+        vol.Optional(CONF_LOCAL_RPC_WRITE_PARAMS): dict,
     }
 )
 
@@ -181,6 +221,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
             domain_data.devices.pop(entry.data.get(CONF_ENTRY_DEVICE_ID), None)
             if not domain_data.devices:
                 hass.services.async_remove(DOMAIN, SERVICE_DUMP_EXECUTE_PAYLOAD)
+                hass.services.async_remove(DOMAIN, SERVICE_DUMP_LOCAL_RPC)
                 hass.services.async_remove(DOMAIN, SERVICE_DUMP_STATUS_SUMMARY)
                 hass.data.pop(DOMAIN, None)
 
@@ -211,6 +252,15 @@ def _async_register_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.OPTIONAL,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_DUMP_LOCAL_RPC):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_DUMP_LOCAL_RPC,
+            _async_create_dump_local_rpc_service(hass),
+            schema=DUMP_LOCAL_RPC_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
 
 def _async_create_dump_execute_payload_service(hass: HomeAssistant):
     """Create the execute payload dump service handler."""
@@ -229,8 +279,19 @@ def _async_create_dump_execute_payload_service(hass: HomeAssistant):
         href = call.data.get(CONF_HREF)
         preset = call.data.get(CONF_PRESET, "all")
         hrefs = (href,) if href else EXECUTE_PAYLOAD_PRESETS[preset]
+        write_property = call.data.get(CONF_WRITE_PROPERTY)
+        write_probe = None
+        if write_property is not None:
+            if href is None:
+                raise HomeAssistantError("write_property requires href")
+            if CONF_WRITE_VALUE not in call.data:
+                raise HomeAssistantError("write_property requires write_value")
+            write_probe = (write_property, call.data[CONF_WRITE_VALUE])
 
-        result = await soundbar_device.async_dump_execute_payload(hrefs)
+        result = await soundbar_device.async_dump_execute_payload(
+            hrefs,
+            write_probe=write_probe,
+        )
         return {
             "preset": None if href else preset,
             "hrefs": list(hrefs),
@@ -258,6 +319,100 @@ def _async_create_dump_status_summary_service(hass: HomeAssistant):
         )
 
     return async_dump_status_summary
+
+
+def _async_create_dump_local_rpc_service(hass: HomeAssistant):
+    """Create the local JSON-RPC dump service handler."""
+
+    async def async_dump_local_rpc(call: ServiceCall) -> ServiceResponse:
+        host = call.data[CONF_LOCAL_RPC_HOST]
+        port = call.data[CONF_LOCAL_RPC_PORT]
+        verify_ssl = call.data[CONF_LOCAL_RPC_VERIFY_SSL]
+        timeout = call.data[CONF_LOCAL_RPC_TIMEOUT]
+        methods = tuple(
+            call.data.get(CONF_LOCAL_RPC_METHODS) or DEFAULT_LOCAL_RPC_METHODS
+        )
+        write_method = call.data.get(CONF_LOCAL_RPC_WRITE_METHOD)
+        write_params = call.data.get(CONF_LOCAL_RPC_WRITE_PARAMS) or {}
+
+        if write_method is not None and not isinstance(write_params, dict):
+            raise HomeAssistantError("write_params must be an object")
+
+        session = async_get_clientsession(hass, verify_ssl=verify_ssl)
+        client = LocalSoundbarRpcClient(
+            host,
+            session,
+            port=port,
+            verify_ssl=verify_ssl,
+            timeout=timeout,
+        )
+        results: dict[str, object] = {}
+        errors: dict[str, str] = {}
+        post_write_results: dict[str, object] = {}
+        post_write_errors: dict[str, str] = {}
+        result: dict[str, object] = {
+            "host": host,
+            "port": port,
+            "verify_ssl": verify_ssl,
+            "timeout": timeout,
+            "methods": list(methods),
+            "token_created": False,
+            "token_length": None,
+            "results": results,
+            "errors": errors,
+            "write_probe": None,
+            "write_result": None,
+            "write_error": None,
+            "post_write_results": post_write_results,
+            "post_write_errors": post_write_errors,
+        }
+
+        try:
+            await client.create_token()
+        except LocalRpcError as err:
+            errors["createAccessToken"] = str(err)
+            return result
+
+        result["token_created"] = True
+        result["token_length"] = client.token_length
+
+        for method in methods:
+            try:
+                results[method] = await client.call(method)
+            except LocalRpcError as err:
+                errors[method] = str(err)
+
+        if write_method is not None:
+            result["write_probe"] = {
+                "method": write_method,
+                "params": _redact_rpc_params(write_params),
+            }
+            try:
+                result["write_result"] = await client.call(write_method, write_params)
+            except LocalRpcError as err:
+                result["write_error"] = str(err)
+
+            for method in methods:
+                try:
+                    post_write_results[method] = await client.call(method)
+                except LocalRpcError as err:
+                    post_write_errors[method] = str(err)
+
+        return result
+
+    return async_dump_local_rpc
+
+
+def _redact_rpc_params(value):
+    """Redact token-like values from local RPC diagnostics."""
+    if isinstance(value, dict):
+        return {
+            key: "***" if "token" in str(key).lower() else _redact_rpc_params(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_rpc_params(item) for item in value]
+    return value
 
 
 def _async_resolve_service_device(

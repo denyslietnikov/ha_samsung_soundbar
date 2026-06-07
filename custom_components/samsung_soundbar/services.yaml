@@ -186,6 +186,7 @@ dump_execute_payload:
         select:
           options:
             - all
+            - q800f_ui
             - advancedaudio
             - spacefitSound
             - activeVoiceAmplifier
@@ -206,6 +207,20 @@ dump_execute_payload:
       example: /sec/networkaudio/advancedaudio
       selector:
         text:
+    write_property:
+      name: Write probe property
+      description: Optional explicit write probe property. Requires href and write_value. This may change the soundbar setting.
+      required: false
+      example: x.com.samsung.networkaudio.spacefitSound
+      selector:
+        text:
+    write_value:
+      name: Write probe value
+      description: Optional explicit write probe value. Used only with write_property and href. This may change the soundbar setting.
+      required: false
+      example: 1
+      selector:
+        object:
 
 dump_status_summary:
   name: Dump status summary
@@ -225,3 +240,84 @@ dump_status_summary:
       default: false
       selector:
         boolean:
+
+dump_local_rpc:
+  name: Dump local RPC
+  description: Probe the soundbar local JSON-RPC API over LAN. Requires the soundbar IP address and IP Control enabled in SmartThings.
+  fields:
+    host:
+      name: Host
+      description: Soundbar IP address or hostname.
+      required: true
+      example: 192.168.1.50
+      selector:
+        text:
+    port:
+      name: Port
+      description: Local JSON-RPC HTTPS port.
+      required: false
+      default: 1516
+      selector:
+        number:
+          min: 1
+          max: 65535
+          step: 1
+          mode: box
+    verify_ssl:
+      name: Verify SSL
+      description: Verify the soundbar HTTPS certificate. Usually disabled because the soundbar uses a self-signed certificate.
+      required: false
+      default: false
+      selector:
+        boolean:
+    timeout:
+      name: Timeout
+      description: Request timeout in seconds.
+      required: false
+      default: 8
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          mode: box
+    methods:
+      name: Methods
+      description: Local JSON-RPC methods to call after createAccessToken succeeds.
+      required: false
+      default:
+        - powerControl
+        - getVolume
+        - getMute
+        - inputSelectControl
+        - soundModeControl
+        - getCodec
+        - getIdentifier
+      selector:
+        select:
+          multiple: true
+          custom_value: true
+          options:
+            - powerControl
+            - getVolume
+            - getMute
+            - inputSelectControl
+            - soundModeControl
+            - getCodec
+            - getIdentifier
+            - createAccessToken
+    write_method:
+      name: Write probe method
+      description: Optional local JSON-RPC method to call with write_params after read methods. The service reads the same methods again after this call. This may change the soundbar setting.
+      required: false
+      example: inputSelectControl
+      selector:
+        text:
+    write_params:
+      name: Write probe params
+      description: Optional JSON-RPC params for write_method. AccessToken is added automatically.
+      required: false
+      example:
+        inputSource: WIFI_IDLE
+      selector:
+        object:

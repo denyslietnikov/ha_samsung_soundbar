@@ -24,10 +24,20 @@ CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR = "settings_soundmode"
 CONF_ENTRY_SETTINGS_WOOFER_NUMBER = "settings_woofer"
 
 SERVICE_DUMP_EXECUTE_PAYLOAD = "dump_execute_payload"
+SERVICE_DUMP_LOCAL_RPC = "dump_local_rpc"
 SERVICE_DUMP_STATUS_SUMMARY = "dump_status_summary"
 CONF_HREF = "href"
+CONF_LOCAL_RPC_HOST = "host"
+CONF_LOCAL_RPC_METHODS = "methods"
+CONF_LOCAL_RPC_PORT = "port"
+CONF_LOCAL_RPC_TIMEOUT = "timeout"
+CONF_LOCAL_RPC_VERIFY_SSL = "verify_ssl"
+CONF_LOCAL_RPC_WRITE_METHOD = "write_method"
+CONF_LOCAL_RPC_WRITE_PARAMS = "write_params"
 CONF_INCLUDE_NULL = "include_null"
 CONF_PRESET = "preset"
+CONF_WRITE_PROPERTY = "write_property"
+CONF_WRITE_VALUE = "write_value"
 
 EXECUTE_PAYLOAD_HREFS = {
     "advancedaudio": "/sec/networkaudio/advancedaudio",
@@ -47,6 +57,19 @@ EXECUTE_PAYLOAD_HREFS = {
 
 EXECUTE_PAYLOAD_PRESETS = {
     "all": tuple(EXECUTE_PAYLOAD_HREFS.values()),
+    "q800f_ui": (
+        EXECUTE_PAYLOAD_HREFS["advancedaudio"],
+        EXECUTE_PAYLOAD_HREFS["soundmode"],
+        EXECUTE_PAYLOAD_HREFS["eq"],
+        EXECUTE_PAYLOAD_HREFS["spacefitSound"],
+        EXECUTE_PAYLOAD_HREFS["activeVoiceAmplifier"],
+        EXECUTE_PAYLOAD_HREFS["woofer"],
+        EXECUTE_PAYLOAD_HREFS["channelVolume"],
+        EXECUTE_PAYLOAD_HREFS["surroundspeaker"],
+        EXECUTE_PAYLOAD_HREFS["moderateBass"],
+        EXECUTE_PAYLOAD_HREFS["virtual"],
+        EXECUTE_PAYLOAD_HREFS["sync"],
+    ),
     **{preset: (href,) for preset, href in EXECUTE_PAYLOAD_HREFS.items()},
 }
 
