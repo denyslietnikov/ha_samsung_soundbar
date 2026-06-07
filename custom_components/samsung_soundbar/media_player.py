@@ -1,10 +1,12 @@
 import logging
+import datetime
 from typing import Any, Mapping
 
 from homeassistant.components.media_player import MediaPlayerDeviceClass, MediaPlayerEntity
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers import config_validation as cv, entity_platform, selector
 import voluptuous as vol
 
@@ -20,6 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_NAME = "SmartThings Soundbar"
 CONF_MAX_VOLUME = "max_volume"
+LOCAL_REFRESH_INTERVAL = datetime.timedelta(seconds=2)
 
 def addServices():
     platform = entity_platform.async_get_current_platform()
@@ -115,6 +118,24 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
             model=self.device.model,
             sw_version=self.device.firmware_version,
         )
+
+    async def async_added_to_hass(self) -> None:
+        """Register a fast local readback loop for hybrid streaming labels."""
+        if not self.device.hybrid_mode:
+            return
+
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass,
+                self._async_update_local_input_source,
+                LOCAL_REFRESH_INTERVAL,
+            )
+        )
+
+    async def _async_update_local_input_source(self, now) -> None:
+        """Refresh local input source and write updated media app/source state."""
+        await self.device.update_local_input_source()
+        self.async_write_ha_state()
 
     async def async_update(self):
         await self.device.update()

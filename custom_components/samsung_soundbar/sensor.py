@@ -1,14 +1,17 @@
 import logging
+import datetime
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import PERCENTAGE
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.event import async_track_time_interval
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
+LOCAL_REFRESH_INTERVAL = datetime.timedelta(seconds=2)
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
@@ -107,6 +110,31 @@ class SoundFromSensor(SensorEntity):
     def native_value(self) -> str | None:
         """Return the current Samsung sound source detail name."""
         return self.__device.sound_from_detail_name
+
+    async def async_added_to_hass(self) -> None:
+        """Register a fast local readback loop for hybrid streaming labels."""
+        if not self.__device.hybrid_mode:
+            return
+
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass,
+                self._async_update_local_input_source,
+                LOCAL_REFRESH_INTERVAL,
+            )
+        )
+
+    async def _async_update_local_input_source(self, now) -> None:
+        """Refresh local input source and write updated Sound From state."""
+        await self.__device.update_local_input_source()
+        self.async_write_ha_state()
+
+    async def async_update(self) -> None:
+        """Refresh the soundbar before reading the sound source detail."""
+        if self.__device.hybrid_mode:
+            await self.__device.update_local_input_source()
+            return
+        await self.__device.update()
 
     @property
     def extra_state_attributes(self) -> dict[str, int | None]:

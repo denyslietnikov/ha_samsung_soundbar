@@ -1,4 +1,5 @@
 import logging
+import datetime
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -14,6 +15,7 @@ from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
 _INVALID_RESTORED_STATES = {STATE_UNAVAILABLE, STATE_UNKNOWN, None}
+SCAN_INTERVAL = datetime.timedelta(seconds=2)
 
 SELECT_ENTITY_NAMES = {
     "eq_preset": "EQ Preset",
@@ -222,6 +224,13 @@ class InputSelectEntity(SelectEntity, RestoreEntity):
     def current_option(self) -> str | None:
         """Get the current status of the select entity from device_status."""
         return self.__device.input_source
+
+    async def async_update(self) -> None:
+        """Refresh the input source quickly in hybrid mode."""
+        if self.__device.hybrid_mode:
+            await self.__device.update_local_input_source()
+            return
+        await self.__device.update()
 
     async def async_select_option(self, option: str) -> None:
         """Set the option."""

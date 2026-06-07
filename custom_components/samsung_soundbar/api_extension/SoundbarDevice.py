@@ -47,6 +47,9 @@ _TRANSIENT_ERROR_STATUSES = {
 }
 _OPTIMISTIC_MUTE_TIMEOUT = datetime.timedelta(seconds=60)
 _OPTIMISTIC_SOUND_MODE_TIMEOUT = datetime.timedelta(seconds=60)
+_LOCAL_FAST_POLL_MIN_AGE = datetime.timedelta(seconds=1)
+_LOCAL_STREAMING_SOURCE_CACHE_TIMEOUT = datetime.timedelta(seconds=15)
+_LOCAL_STATUS_CACHE_TIMEOUT = datetime.timedelta(minutes=2)
 _ARTWORK_RETRY_INTERVAL = datetime.timedelta(minutes=5)
 _ARTWORK_URL_KEY_HINTS = ("art", "cover", "image", "thumbnail")
 _GENERIC_SOUND_FROM_DETAIL_NAMES = {
@@ -69,24 +72,52 @@ _GENERIC_SOUND_FROM_DETAIL_NAMES = {
 }
 _STREAMING_SOUND_FROM_ALIASES = {
     "airplay": "AirPlay",
+    "chromecast": "Google Cast",
+    "google cast": "Google Cast",
+    "googlecast": "Google Cast",
+    "roon": "Roon",
     "spotify": "Spotify",
+}
+_LOCAL_STREAMING_SOURCE_TO_DETAIL = {
+    "AIRPLAY": "AirPlay",
+    "CD": "Roon",
+    "GOOGLE": "Google Cast",
+    "ROON": "Roon",
+    "SPOTIFY": "Spotify",
+    "WIFI_AIRPLAY": "AirPlay",
+    "WIFI_GOOGLE": "Google Cast",
+    "WIFI_ROON": "Roon",
+    "WIFI_SPOTIFY": "Spotify",
 }
 _LOCAL_SOURCE_TO_HA = {
     "HDMI_IN1": "HDMI1",
     "HDMI_IN2": "HDMI2",
-    "E_ARC": "TV ARC",
-    "ARC": "TV ARC",
+    "ARC": "TV ARC/eARC",
+    "EARC": "TV ARC/eARC",
+    "E_ARC": "TV ARC/eARC",
+    "TV_ARC": "TV ARC/eARC",
+    "TV_EARC": "TV ARC/eARC",
+    "TV_ARC_EARC": "TV ARC/eARC",
     "D_IN": "D.IN",
     "BT": "BT",
+    "WIFI": "WIFI",
+    "WIFI_AIRPLAY": "WIFI",
+    "WIFI_GOOGLE": "WIFI",
     "WIFI_IDLE": "WIFI",
+    "WIFI_ROON": "WIFI",
+    "WIFI_SPOTIFY": "WIFI",
+    "CD": "WIFI",
 }
 _HA_SOURCE_TO_LOCAL = {
     **{value: key for key, value in _LOCAL_SOURCE_TO_HA.items()},
     "HDMI1": "HDMI_IN1",
     "HDMI2": "HDMI_IN2",
     "TV ARC": "E_ARC",
+    "TV eARC": "E_ARC",
+    "TV ARC/eARC": "E_ARC",
     "ARC": "ARC",
     "E_ARC": "E_ARC",
+    "EARC": "E_ARC",
     "D.IN": "D_IN",
     "D_IN": "D_IN",
     "WIFI": "WIFI_IDLE",
@@ -140,6 +171,8 @@ class SoundbarDevice:
         self.__local_rpc = local_rpc
         self.__local_fallback_to_cloud = local_fallback_to_cloud
         self.__local_status: dict[str, Any] = {}
+        self.__local_status_updated_at: datetime.datetime | None = None
+        self.__local_status_update_lock = asyncio.Lock()
         self.__local_available = False
         self.__local_last_error: str | None = None
 
@@ -312,6 +345,7 @@ class SoundbarDevice:
                 local_status["sound_mode"] = self.__optimistic_sound_mode
                 sound_mode_readback_missing = True
             self.__local_status = local_status
+            self.__local_status_updated_at = datetime.datetime.now()
             self.__local_available = True
             self.__local_last_error = None
             if sound_mode_readback_missing:
@@ -327,6 +361,62 @@ class SoundbarDevice:
                 self.device_name,
                 err,
             )
+
+    async def update_local_status(
+        self,
+        min_age: datetime.timedelta | None = _LOCAL_FAST_POLL_MIN_AGE,
+    ) -> None:
+        """Refresh only the local JSON-RPC status in hybrid mode."""
+        if min_age is not None and self.__has_fresh_local_status(min_age):
+            return
+
+        async with self.__local_status_update_lock:
+            if min_age is not None and self.__has_fresh_local_status(min_age):
+                return
+            await self.__update_local_status()
+
+    async def update_local_input_source(
+        self,
+        min_age: datetime.timedelta | None = _LOCAL_FAST_POLL_MIN_AGE,
+    ) -> None:
+        """Refresh only local input source readback in hybrid mode."""
+        if not self.hybrid_mode or self.__local_rpc is None:
+            return
+        if min_age is not None and self.__has_fresh_local_status(min_age):
+            return
+
+        async with self.__local_status_update_lock:
+            if min_age is not None and self.__has_fresh_local_status(min_age):
+                return
+
+            try:
+                local_input_source = self.__normalize_local_value(
+                    await self.__local_rpc.input_source()
+                )
+            except LocalRpcError as err:
+                self.__local_available = False
+                self.__local_last_error = str(err)
+                log.debug(
+                    "[%s] Local RPC input source update failed for %s: %s",
+                    DOMAIN,
+                    self.device_name,
+                    err,
+                )
+                return
+
+            if local_input_source is not None:
+                self.__local_status["input_source"] = local_input_source
+                self.__last_known_input_source = self.__ha_source_from_local(
+                    local_input_source
+                )
+            elif self.__last_known_input_source is not None:
+                self.__local_status["input_source"] = self.__local_source_from_ha(
+                    self.__last_known_input_source
+                )
+
+            self.__local_status_updated_at = datetime.datetime.now()
+            self.__local_available = True
+            self.__local_last_error = None
 
     async def __try_local_rpc(
         self,
@@ -359,10 +449,46 @@ class SoundbarDevice:
             ) from err
 
     def __local_value(self, key: str) -> Any:
+        return self.__local_status_value(key, allow_cached=False)
+
+    def __local_status_value(self, key: str, allow_cached: bool = False) -> Any:
         if not self.hybrid_mode or not self.__local_available:
-            return None
+            if not allow_cached:
+                return None
+            if not self.__has_recent_local_status():
+                return None
         value = self.__local_status.get(key)
         return self.__normalize_local_value(value)
+
+    def __has_recent_local_status(self) -> bool:
+        if not self.hybrid_mode or not self.__local_status:
+            return False
+        if self.__local_available:
+            return True
+        if self.__local_status_updated_at is None:
+            return False
+        return (
+            datetime.datetime.now() - self.__local_status_updated_at
+            <= _LOCAL_STATUS_CACHE_TIMEOUT
+        )
+
+    def __has_fresh_local_status(self, max_age: datetime.timedelta) -> bool:
+        if (
+            not self.hybrid_mode
+            or not self.__local_available
+            or self.__local_status_updated_at is None
+        ):
+            return False
+        return datetime.datetime.now() - self.__local_status_updated_at <= max_age
+
+    def __has_cached_local_status(self, max_age: datetime.timedelta) -> bool:
+        if (
+            not self.hybrid_mode
+            or not self.__local_status
+            or self.__local_status_updated_at is None
+        ):
+            return False
+        return datetime.datetime.now() - self.__local_status_updated_at <= max_age
 
     @staticmethod
     def __normalize_local_value(value: Any) -> Any:
@@ -376,11 +502,23 @@ class SoundbarDevice:
     def __ha_source_from_local(source: str | None) -> str | None:
         if source is None:
             return None
-        return _LOCAL_SOURCE_TO_HA.get(source, source)
+        source_key = SoundbarDevice.__source_map_key(source)
+        return _LOCAL_SOURCE_TO_HA.get(source_key, source)
 
     @staticmethod
     def __local_source_from_ha(source: str) -> str:
+        source = source.strip()
         return _HA_SOURCE_TO_LOCAL.get(source, source)
+
+    @staticmethod
+    def __source_map_key(source: str) -> str:
+        return (
+            source.strip()
+            .upper()
+            .replace("-", "_")
+            .replace("/", "_")
+            .replace(" ", "_")
+        )
 
     @staticmethod
     def __ha_sound_mode_from_local(sound_mode: str | None) -> str | None:
@@ -458,7 +596,34 @@ class SoundbarDevice:
                 continue
             return self.__canonical_sound_from_detail(candidate)
 
+        return self.__local_streaming_sound_from_detail_name()
+
+    def __local_streaming_sound_from_detail_name(self) -> str | None:
+        if not self.hybrid_mode:
+            return None
+
+        local_source = self.__local_streaming_input_source()
+        if not isinstance(local_source, str):
+            return None
+
+        normalized_source = local_source.strip().upper()
+        if not normalized_source:
+            return None
+
+        direct_match = _LOCAL_STREAMING_SOURCE_TO_DETAIL.get(normalized_source)
+        if direct_match is not None:
+            return direct_match
+
+        for source_part, detail_name in _LOCAL_STREAMING_SOURCE_TO_DETAIL.items():
+            if source_part in normalized_source:
+                return detail_name
+
         return None
+
+    def __local_streaming_input_source(self) -> str | None:
+        if not self.__has_cached_local_status(_LOCAL_STREAMING_SOURCE_CACHE_TIMEOUT):
+            return None
+        return self.__normalize_local_value(self.__local_status.get("input_source"))
 
     def remember_input_source(self, source: str | None) -> None:
         """Remember the last HA input source for off/unavailable local readback."""
@@ -1042,12 +1207,23 @@ class SoundbarDevice:
         local_source = self.__local_value("input_source")
         if local_source is not None:
             return self.__ha_source_from_local(local_source)
-        if self.__last_known_input_source is not None:
-            return self.__last_known_input_source
 
-        if self.media_app_name in ("AirPlay", "Spotify"):
+        cached_local_source = self.__local_status_value(
+            "input_source",
+            allow_cached=True,
+        )
+        if cached_local_source is not None:
+            return self.__ha_source_from_local(cached_local_source)
+
+        if self.media_app_name in ("AirPlay", "Google Cast", "Roon", "Spotify"):
             return "WIFI"
-        return self.__normalize_local_value(self.device.status.input_source)
+
+        cloud_source = self.__normalize_local_value(self.device.status.input_source)
+        if cloud_source is not None:
+            self.__last_known_input_source = cloud_source
+            return cloud_source
+
+        return self.__last_known_input_source
 
     @property
     def sound_from_detail_name(self) -> str | None:
@@ -1066,7 +1242,10 @@ class SoundbarDevice:
     @property
     def supported_input_sources(self):
         if self.hybrid_mode:
-            sources = list(self.device.status.supported_input_sources or [])
+            sources = [
+                self.__ha_source_from_local(source)
+                for source in self.device.status.supported_input_sources or []
+            ]
             if not sources:
                 sources = [
                     self.__ha_source_from_local(source)
@@ -1588,6 +1767,14 @@ class SoundbarDevice:
             "local": {
                 "available": self.local_available,
                 "last_error": self.local_last_error,
+                "updated_at": (
+                    None
+                    if self.__local_status_updated_at is None
+                    else self.__local_status_updated_at.isoformat(timespec="seconds")
+                ),
+                "cached": bool(
+                    not self.local_available and self.__has_recent_local_status()
+                ),
                 "status": self.__json_safe(self.__local_status),
             },
             "resolved": self.retrieve_data,
