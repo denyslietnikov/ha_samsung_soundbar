@@ -1,3 +1,4 @@
+import base64
 import logging
 from datetime import datetime
 
@@ -10,6 +11,11 @@ from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
+
+_TRANSPARENT_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+    "/x8AAwMB/6X8XMsAAAAASUVORK5CYII="
+)
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
@@ -45,19 +51,26 @@ class SoundbarImageEntity(ImageEntity):
         )
 
         self.__updated = None
+        self.__using_placeholder = False
 
     # ---------- GENERAL ---------------
     @property
     def entity_picture(self) -> str | None:
-        """Return local proxy URL only when an artwork URL exists."""
-        if self.image_url is None:
-            return None
+        """Return a local proxy URL for real artwork or the no-artwork placeholder."""
+        self.__sync_image_state()
         return super().entity_picture
 
     @property
     def image_url(self) -> str | None:
         """Return URL of image."""
         return self.__device.media_coverart_url or None
+
+    @property
+    def content_type(self) -> str | None:
+        """Return content type for the generated placeholder image."""
+        if self.image_url is None:
+            return "image/png"
+        return super().content_type
 
     @property
     def image_last_updated(self) -> datetime | None:
@@ -69,12 +82,27 @@ class SoundbarImageEntity(ImageEntity):
         """Refresh image entity state from the shared soundbar device cache."""
         self.__sync_image_state()
 
+    async def async_image(self) -> bytes | None:
+        """Return current artwork bytes, or a valid placeholder when idle."""
+        if self.image_url is None:
+            self.__sync_image_state()
+            return _TRANSPARENT_PNG
+        return await super().async_image()
+
     def __sync_image_state(self) -> None:
         """Clear cached bytes when the soundbar artwork changes."""
         current = self.__device.media_coverart_updated
-        if self.__updated != current:
+        if current is None:
+            if not self.__using_placeholder:
+                self._cached_image = None
+                self.__updated = datetime.now()
+                self.__using_placeholder = True
+            return
+
+        if self.__updated != current or self.__using_placeholder:
             self._cached_image = None
             self.__updated = current
+            self.__using_placeholder = False
 
     @property
     def name(self):

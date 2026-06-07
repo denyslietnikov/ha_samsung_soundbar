@@ -1,7 +1,9 @@
 import logging
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import (
@@ -11,6 +13,7 @@ from .const import (
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
+_INVALID_RESTORED_STATES = {STATE_UNAVAILABLE, STATE_UNKNOWN, None}
 
 SELECT_ENTITY_NAMES = {
     "eq_preset": "EQ Preset",
@@ -105,7 +108,7 @@ class EqPresetSelectEntity(SelectEntity):
         await self.__device.set_equalizer_preset(option)
 
 
-class SoundModeSelectEntity(SelectEntity):
+class SoundModeSelectEntity(SelectEntity, RestoreEntity):
     def __init__(
         self,
         device: SoundbarDevice,
@@ -146,6 +149,14 @@ class SoundModeSelectEntity(SelectEntity):
 
     # ------ STATE FUNCTIONS --------
 
+    async def async_added_to_hass(self) -> None:
+        """Restore the last selected sound mode before live readback is available."""
+        if (last_state := await self.async_get_last_state()) is None:
+            return
+        if last_state.state in _INVALID_RESTORED_STATES:
+            return
+        self.__device.remember_sound_mode(last_state.state)
+
     @property
     def current_option(self) -> str | None:
         """Get the current status of the select entity from device_status."""
@@ -158,7 +169,7 @@ class SoundModeSelectEntity(SelectEntity):
         self.async_write_ha_state()
 
 
-class InputSelectEntity(SelectEntity):
+class InputSelectEntity(SelectEntity, RestoreEntity):
     def __init__(
         self,
         device: SoundbarDevice,
@@ -198,6 +209,14 @@ class InputSelectEntity(SelectEntity):
         return self.__base_icon
 
     # ------ STATE FUNCTIONS --------
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last selected input before live readback is available."""
+        if (last_state := await self.async_get_last_state()) is None:
+            return
+        if last_state.state in _INVALID_RESTORED_STATES:
+            return
+        self.__device.remember_input_source(last_state.state)
 
     @property
     def current_option(self) -> str | None:
