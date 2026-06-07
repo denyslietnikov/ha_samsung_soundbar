@@ -4,7 +4,6 @@ from datetime import datetime
 from homeassistant.components.image import ImageEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.typing import UndefinedType
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
@@ -36,6 +35,7 @@ class SoundbarImageEntity(ImageEntity):
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
         self._attr_name = "Media Artwork"
         self._attr_entity_registry_enabled_default = False
+        self._attr_should_poll = True
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.__device.device_id)},
             name=self.__device.device_name,
@@ -48,18 +48,33 @@ class SoundbarImageEntity(ImageEntity):
 
     # ---------- GENERAL ---------------
     @property
-    def image_url(self) -> str | None | UndefinedType:
+    def entity_picture(self) -> str | None:
+        """Return local proxy URL only when an artwork URL exists."""
+        if self.image_url is None:
+            return None
+        return super().entity_picture
+
+    @property
+    def image_url(self) -> str | None:
         """Return URL of image."""
         return self.__device.media_coverart_url or None
 
     @property
     def image_last_updated(self) -> datetime | None:
         """The time when the image was last updated."""
+        self.__sync_image_state()
+        return self.__updated
+
+    async def async_update(self) -> None:
+        """Refresh image entity state from the shared soundbar device cache."""
+        self.__sync_image_state()
+
+    def __sync_image_state(self) -> None:
+        """Clear cached bytes when the soundbar artwork changes."""
         current = self.__device.media_coverart_updated
         if self.__updated != current:
             self._cached_image = None
             self.__updated = current
-        return current
 
     @property
     def name(self):
