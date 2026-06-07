@@ -36,6 +36,7 @@ _TRANSIENT_ERROR_STATUSES = {
     520,
     524,
 }
+_OPTIMISTIC_MUTE_TIMEOUT = datetime.timedelta(seconds=60)
 
 
 class SoundbarDevice:
@@ -87,6 +88,8 @@ class SoundbarDevice:
         self.__old_media_key = ""
         self.__last_execute_payload_dump: dict[str, Any] | None = None
         self.__unsupported_execute_payload_hrefs: set[str] = set()
+        self.__optimistic_mute: bool | None = None
+        self.__optimistic_mute_updated_at: datetime.datetime | None = None
 
         self.__max_volume = max_volume
 
@@ -98,6 +101,7 @@ class SoundbarDevice:
             self.device.status.refresh,
             "refresh device status",
         )
+        self.__sync_optimistic_mute()
 
         await self._update_media()
 
@@ -484,6 +488,8 @@ class SoundbarDevice:
 
     @property
     def volume_muted(self) -> bool:
+        if self.__optimistic_mute is not None:
+            return self.__optimistic_mute
         return self.device.status.mute
 
     async def set_volume(self, volume: float):
@@ -508,6 +514,28 @@ class SoundbarDevice:
                 lambda: self.device.unmute(True),
                 "unmute volume",
             )
+        self.__set_optimistic_mute(mute)
+
+    def __set_optimistic_mute(self, mute: bool) -> None:
+        self.__optimistic_mute = mute
+        self.__optimistic_mute_updated_at = datetime.datetime.now()
+
+    def __sync_optimistic_mute(self) -> None:
+        if self.__optimistic_mute is None:
+            return
+
+        if self.device.status.mute == self.__optimistic_mute:
+            self.__optimistic_mute = None
+            self.__optimistic_mute_updated_at = None
+            return
+
+        if (
+            self.__optimistic_mute_updated_at is not None
+            and datetime.datetime.now() - self.__optimistic_mute_updated_at
+            > _OPTIMISTIC_MUTE_TIMEOUT
+        ):
+            self.__optimistic_mute = None
+            self.__optimistic_mute_updated_at = None
 
     async def volume_up(self):
         await self.__call_smartthings(

@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Mapping
 
-from homeassistant.components.media_player import MediaPlayerEntity
+from homeassistant.components.media_player import MediaPlayerDeviceClass, MediaPlayerEntity
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
@@ -106,6 +106,7 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
         self.session = session
         self.device = device
         self._attr_unique_id = f"{self.device.device_id}_mp"
+        self._attr_device_class = MediaPlayerDeviceClass.SPEAKER
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.device.device_id)},
@@ -173,6 +174,7 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
 
     async def async_mute_volume(self, mute):
         await self.device.mute_volume(mute)
+        self.async_write_ha_state()
 
     async def async_volume_up(self):
         await self.device.volume_up()

@@ -209,11 +209,27 @@ class SmartThingsDeviceCompat:
 
     async def mute(self, wait: bool = False) -> bool:
         """Mute audio."""
-        return await self.command("main", "audioMute", "mute")
+        return await self.set_mute(True, wait)
 
     async def unmute(self, wait: bool = False) -> bool:
         """Unmute audio."""
-        return await self.command("main", "audioMute", "unmute")
+        return await self.set_mute(False, wait)
+
+    async def set_mute(self, mute: bool, wait: bool = False) -> bool:
+        """Set audio mute state using the public SmartThings command."""
+        try:
+            return await self.command(
+                "main",
+                "audioMute",
+                "setMute",
+                "muted" if mute else "unmuted",
+            )
+        except SmartThingsCommandError:
+            return await self.command(
+                "main",
+                "audioMute",
+                "mute" if mute else "unmute",
+            )
 
     async def volume_up(self, wait: bool = False) -> bool:
         """Increase audio volume."""
