@@ -115,7 +115,13 @@ class SmartThingsStatusCompat:
     @property
     def playback_status(self) -> str | None:
         """Return media playback state."""
-        return self._value("mediaPlayback", "playbackStatus")
+        return self._first_value(
+            (
+                "mediaPlayback",
+                "samsungvd.audioPlayback",
+            ),
+            "playbackStatus",
+        )
 
     @property
     def volume(self) -> int:
@@ -155,12 +161,24 @@ class SmartThingsStatusCompat:
     @property
     def sound_from_detail_name(self) -> str | None:
         """Return the current Samsung sound source detail name."""
-        return self._value("samsungvd.soundFrom", "detailName")
+        return self._first_value(
+            (
+                "samsungvd.soundFrom",
+                "samsungvd.audioSoundFrom",
+            ),
+            "detailName",
+        )
 
     @property
     def sound_from_mode(self) -> int | None:
         """Return the current Samsung sound source mode."""
-        value = self._value("samsungvd.soundFrom", "mode")
+        value = self._first_value(
+            (
+                "samsungvd.soundFrom",
+                "samsungvd.audioSoundFrom",
+            ),
+            "mode",
+        )
         return int(value) if value is not None else None
 
 

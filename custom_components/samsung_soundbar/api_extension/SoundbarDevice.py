@@ -379,31 +379,37 @@ class SoundbarDevice:
         self,
         min_age: datetime.timedelta | None = _LOCAL_FAST_POLL_MIN_AGE,
     ) -> None:
-        """Refresh only local input source readback in hybrid mode."""
+        """Refresh lightweight local state used by media player readback."""
         if not self.hybrid_mode or self.__local_rpc is None:
             return
-        if min_age is not None and self.__has_fresh_local_status(min_age):
+        if min_age is not None and self.__has_fresh_local_media_status(min_age):
             return
 
         async with self.__local_status_update_lock:
-            if min_age is not None and self.__has_fresh_local_status(min_age):
+            if min_age is not None and self.__has_fresh_local_media_status(min_age):
                 return
 
             try:
-                local_input_source = self.__normalize_local_value(
-                    await self.__local_rpc.input_source()
+                local_power, local_input_source = await asyncio.gather(
+                    self.__local_rpc.power_state(),
+                    self.__local_rpc.input_source(),
                 )
             except LocalRpcError as err:
                 self.__local_available = False
                 self.__local_last_error = str(err)
                 log.debug(
-                    "[%s] Local RPC input source update failed for %s: %s",
+                    "[%s] Local RPC media state update failed for %s: %s",
                     DOMAIN,
                     self.device_name,
                     err,
                 )
                 return
 
+            local_power = self.__normalize_local_value(local_power)
+            if local_power is not None:
+                self.__local_status["power"] = local_power
+
+            local_input_source = self.__normalize_local_value(local_input_source)
             if local_input_source is not None:
                 self.__local_status["input_source"] = local_input_source
                 self.__last_known_input_source = self.__ha_source_from_local(
@@ -489,6 +495,11 @@ class SoundbarDevice:
         ):
             return False
         return datetime.datetime.now() - self.__local_status_updated_at <= max_age
+
+    def __has_fresh_local_media_status(self, max_age: datetime.timedelta) -> bool:
+        if not self.__has_fresh_local_status(max_age):
+            return False
+        return "power" in self.__local_status and "input_source" in self.__local_status
 
     @staticmethod
     def __normalize_local_value(value: Any) -> Any:
@@ -973,7 +984,9 @@ class SoundbarDevice:
 
     @property
     def can_control_playback(self) -> bool:
-        return self.has_status_capability("mediaPlayback")
+        return self.has_status_capability("mediaPlayback") or self.has_status_capability(
+            "samsungvd.audioPlayback"
+        )
 
     @property
     def can_select_sound_mode(self) -> bool:
@@ -1466,33 +1479,29 @@ class SoundbarDevice:
             return attr.value
 
     async def media_play(self):
-        await self.__call_smartthings(
-            lambda: self.device.play(True),
-            "media play",
-        )
+        await self.__call_playback_command("play", "media play")
 
     async def media_pause(self):
-        await self.__call_smartthings(
-            lambda: self.device.pause(True),
-            "media pause",
-        )
+        await self.__call_playback_command("pause", "media pause")
 
     async def media_stop(self):
-        await self.__call_smartthings(
-            lambda: self.device.stop(True),
-            "media stop",
-        )
+        await self.__call_playback_command("stop", "media stop")
 
     async def media_next_track(self):
-        await self.__call_smartthings(
-            lambda: self.device.command("main", "mediaPlayback", "fastForward"),
-            "media next track",
-        )
+        await self.__call_playback_command("fastForward", "media next track")
 
     async def media_previous_track(self):
+        await self.__call_playback_command("rewind", "media previous track")
+
+    async def __call_playback_command(self, command: str, description: str) -> None:
+        capability = (
+            "samsungvd.audioPlayback"
+            if self.has_status_capability("samsungvd.audioPlayback")
+            else "mediaPlayback"
+        )
         await self.__call_smartthings(
-            lambda: self.device.command("main", "mediaPlayback", "rewind"),
-            "media previous track",
+            lambda: self.device.command("main", capability, command),
+            description,
         )
 
     @property
