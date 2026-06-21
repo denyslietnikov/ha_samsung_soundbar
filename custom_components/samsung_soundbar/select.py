@@ -154,6 +154,11 @@ class SoundModeSelectEntity(SelectEntity, RestoreEntity):
         """Get the current status of the select entity from device_status."""
         return self.__device.sound_mode
 
+    async def async_update(self) -> None:
+        """Refresh local sound mode before publishing the select state."""
+        if self.__device.hybrid_mode:
+            await self.__device.update_local_input_source()
+
     async def async_select_option(self, option: str) -> None:
         """Set the option."""
 

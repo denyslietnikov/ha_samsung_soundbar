@@ -52,6 +52,7 @@ class LocalSoundbarRpcClient:
         self._timeout = timeout
         self._token: str | None = None
         self._token_lock = asyncio.Lock()
+        self._call_lock = asyncio.Lock()
         self._request_id = 0
 
     @property
@@ -141,6 +142,22 @@ class LocalSoundbarRpcClient:
         *,
         authenticated: bool = True,
     ) -> dict[str, Any]:
+        """Call one RPC method at a time.
+
+        Samsung soundbars can refuse connections when several JSON-RPC calls
+        are issued concurrently. Status collection uses asyncio.gather(), so
+        serialization belongs here rather than at each caller.
+        """
+        async with self._call_lock:
+            return await self._call(method, params, authenticated=authenticated)
+
+    async def _call(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        authenticated: bool = True,
+    ) -> dict[str, Any]:
         if method == "createAccessToken":
             token = await self.create_token()
             return {"AccessToken": self._redact_token(token)}
@@ -208,7 +225,10 @@ class LocalSoundbarRpcClient:
 
     async def volume(self) -> int:
         value = (await self.call("getVolume")).get("volume")
-        return int(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError) as err:
+            raise LocalRpcError("getVolume did not return a valid volume") from err
 
     async def is_muted(self) -> bool:
         return bool((await self.call("getMute")).get("mute"))

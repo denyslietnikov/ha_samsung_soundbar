@@ -52,6 +52,8 @@ class VolumeSensor(SensorEntity):
     @property
     def native_value(self) -> int | None:
         """Return the current soundbar volume."""
+        if self.__device.hybrid_mode:
+            return round(self.__device.volume_level * 100)
         return self.__device.device.status.volume
 
 

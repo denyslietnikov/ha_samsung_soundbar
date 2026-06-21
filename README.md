@@ -16,7 +16,7 @@ This fork mainly focuses on:
 
 ## OAuth Beta Setup
 
-Beta `0.7.0b52` targets Home Assistant `2026.6.1` or newer. This is the first
+Beta `0.7.0b61` targets Home Assistant `2026.6.1` or newer. This is the first
 Home Assistant release that ships `pysmartthings 4.0.1`; the library requires
 Python 3.13 or newer.
 

@@ -48,6 +48,8 @@ _TRANSIENT_ERROR_STATUSES = {
 }
 _OPTIMISTIC_MUTE_TIMEOUT = datetime.timedelta(seconds=60)
 _OPTIMISTIC_SOUND_MODE_TIMEOUT = datetime.timedelta(seconds=60)
+_LOCAL_SOUND_MODE_CONFIRMATIONS = 2
+_LOCAL_VOLUME_MAX = 100
 _LOCAL_FAST_POLL_MIN_AGE = datetime.timedelta(seconds=1)
 _LOCAL_STREAMING_SOURCE_CACHE_TIMEOUT = datetime.timedelta(seconds=15)
 _LOCAL_STATUS_CACHE_TIMEOUT = datetime.timedelta(minutes=2)
@@ -217,6 +219,8 @@ class SoundbarDevice:
         self.__optimistic_sound_mode_updated_at: datetime.datetime | None = None
         self.__last_known_input_source: str | None = None
         self.__last_known_sound_mode: str | None = None
+        self.__pending_local_sound_mode: str | None = None
+        self.__pending_local_sound_mode_count = 0
         self.__update_listeners: set[Callable[[], None]] = set()
         self.__cloud_available = True
 
@@ -357,6 +361,9 @@ class SoundbarDevice:
         try:
             local_status = await self.__local_rpc.status()
             sound_mode_readback_missing = False
+            local_is_powered_off = (
+                self.__normalize_local_value(local_status.get("power")) == "powerOff"
+            )
             local_input_source = self.__normalize_local_value(
                 local_status.get("input_source")
             )
@@ -372,8 +379,18 @@ class SoundbarDevice:
             local_sound_mode = self.__normalize_local_value(
                 local_status.get("sound_mode")
             )
+            if local_is_powered_off:
+                # Q800F can return stale, alternating sound modes after power-off.
+                # Keep the last valid on-state value until the soundbar is on again.
+                local_status.pop("sound_mode", None)
+                local_sound_mode = None
+                self.__pending_local_sound_mode = None
+                self.__pending_local_sound_mode_count = 0
             if local_sound_mode is not None:
-                self.__last_known_sound_mode = local_sound_mode
+                local_sound_mode = self.__confirm_local_sound_mode(
+                    local_sound_mode
+                )
+                local_status["sound_mode"] = local_sound_mode
             elif self.__last_known_sound_mode is not None:
                 local_status["sound_mode"] = self.__last_known_sound_mode
                 sound_mode_readback_missing = True
@@ -422,7 +439,7 @@ class SoundbarDevice:
         self,
         min_age: datetime.timedelta | None = _LOCAL_FAST_POLL_MIN_AGE,
     ) -> None:
-        """Refresh lightweight local state used by media player readback."""
+        """Refresh fast-changing local state used by media player readback."""
         if not self.hybrid_mode or self.__local_rpc is None:
             return
         if min_age is not None and self.__has_fresh_local_media_status(min_age):
@@ -433,12 +450,26 @@ class SoundbarDevice:
                 return
 
             try:
-                local_power, local_input_source = await asyncio.gather(
+                (
+                    local_power,
+                    local_input_source,
+                    local_volume,
+                    local_mute,
+                    local_sound_mode,
+                ) = await asyncio.gather(
                     self.__local_rpc.power_state(),
                     self.__local_rpc.input_source(),
+                    self.__local_rpc.volume(),
+                    self.__local_rpc.is_muted(),
+                    self.__local_rpc.sound_mode(),
                 )
             except LocalRpcError as err:
-                self.__local_available = False
+                # Do not discard a usable local cache because one fast polling
+                # cycle failed. Falling back to the slower cloud value for a
+                # single cycle makes the Home Assistant volume slider jump.
+                self.__local_available = self.__has_cached_local_status(
+                    _LOCAL_STATUS_CACHE_TIMEOUT
+                )
                 self.__local_last_error = str(err)
                 log.debug(
                     "[%s] Local RPC media state update failed for %s: %s",
@@ -451,6 +482,27 @@ class SoundbarDevice:
             local_power = self.__normalize_local_value(local_power)
             if local_power is not None:
                 self.__local_status["power"] = local_power
+
+            local_volume = self.__normalize_local_value(local_volume)
+            if local_volume is not None:
+                self.__local_status["volume"] = local_volume
+
+            local_mute = self.__normalize_local_value(local_mute)
+            if local_mute is not None:
+                self.__local_status["mute"] = local_mute
+
+            previous_sound_mode = self.__local_status.get("sound_mode")
+            local_sound_mode = self.__normalize_local_value(local_sound_mode)
+            if local_power == "powerOff":
+                self.__pending_local_sound_mode = None
+                self.__pending_local_sound_mode_count = 0
+                self.__local_status.pop("sound_mode", None)
+            elif local_sound_mode is not None:
+                self.__local_status["sound_mode"] = self.__confirm_local_sound_mode(
+                    local_sound_mode
+                )
+            elif self.__last_known_sound_mode is not None:
+                self.__local_status["sound_mode"] = self.__last_known_sound_mode
 
             local_input_source = self.__normalize_local_value(local_input_source)
             if local_input_source is not None:
@@ -466,6 +518,8 @@ class SoundbarDevice:
             self.__local_status_updated_at = datetime.datetime.now()
             self.__local_available = True
             self.__local_last_error = None
+            if previous_sound_mode != self.__local_status.get("sound_mode"):
+                self.__notify_update_listeners()
 
     async def __try_local_rpc(
         self,
@@ -690,6 +744,38 @@ class SoundbarDevice:
         if self.__normalize_local_value(sound_mode) is None:
             return
         self.__last_known_sound_mode = self.__local_sound_mode_from_ha(sound_mode)
+        self.__pending_local_sound_mode = None
+        self.__pending_local_sound_mode_count = 0
+
+    def __confirm_local_sound_mode(self, sound_mode: str) -> str:
+        """Return a stable local sound mode after confirming changes twice."""
+        if self.__last_known_sound_mode is None:
+            self.__last_known_sound_mode = sound_mode
+            self.__pending_local_sound_mode = None
+            self.__pending_local_sound_mode_count = 0
+            return sound_mode
+
+        if sound_mode == self.__last_known_sound_mode:
+            self.__pending_local_sound_mode = None
+            self.__pending_local_sound_mode_count = 0
+            return sound_mode
+
+        if sound_mode == self.__pending_local_sound_mode:
+            self.__pending_local_sound_mode_count += 1
+        else:
+            self.__pending_local_sound_mode = sound_mode
+            self.__pending_local_sound_mode_count = 1
+
+        if self.__pending_local_sound_mode_count >= _LOCAL_SOUND_MODE_CONFIRMATIONS:
+            self.__last_known_sound_mode = sound_mode
+            self.__pending_local_sound_mode = None
+            self.__pending_local_sound_mode_count = 0
+            return sound_mode
+
+        # Q800F intermittently alternates between two values while its actual
+        # sound mode has not changed. Keep the confirmed state until readback
+        # has repeated the new value.
+        return self.__last_known_sound_mode
 
     async def _update_media(self):
         audio_track_status = self.device.status._attributes.get("audioTrackData")
@@ -1128,11 +1214,11 @@ class SoundbarDevice:
     def volume_level(self) -> float:
         local_volume = self.__local_value("volume")
         if local_volume is not None:
-            if local_volume > self.__max_volume:
-                return 1.0
-            return local_volume / self.__max_volume
+            return min(local_volume, _LOCAL_VOLUME_MAX) / _LOCAL_VOLUME_MAX
 
         vol = self.device.status.volume
+        if self.hybrid_mode:
+            return min(vol, _LOCAL_VOLUME_MAX) / _LOCAL_VOLUME_MAX
         if vol > self.__max_volume:
             return 1.0
         return self.device.status.volume / self.__max_volume
@@ -1153,15 +1239,18 @@ class SoundbarDevice:
         This respects the max volume and hovers between
         :param volume: between 0 and 1
         """
-        local_level = int(volume * self.__max_volume)
+        local_level = int(volume * _LOCAL_VOLUME_MAX)
         if await self.__try_local_rpc(
             lambda local: local.set_volume(local_level),
             "set volume",
         ):
             return
 
+        cloud_level = int(
+            volume * (_LOCAL_VOLUME_MAX if self.hybrid_mode else self.__max_volume)
+        )
         await self.__call_smartthings(
-            lambda: self.device.set_volume(int(volume * self.__max_volume), True),
+            lambda: self.device.set_volume(cloud_level, True),
             "set volume",
         )
 
@@ -1419,7 +1508,7 @@ class SoundbarDevice:
                 "select sound mode",
             ):
                 self.__local_status["sound_mode"] = local_sound_mode
-                self.__last_known_sound_mode = local_sound_mode
+                self.remember_sound_mode(sound_mode)
                 self.__set_optimistic_sound_mode(local_sound_mode)
                 return
 

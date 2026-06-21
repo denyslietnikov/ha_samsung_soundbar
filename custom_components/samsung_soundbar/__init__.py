@@ -65,6 +65,7 @@ from .const import (
     SERVICE_DUMP_LOCAL_RPC,
     SERVICE_DUMP_STATUS_SUMMARY,
 )
+from .device_info import async_unmerge_official_smartthings_device
 from .entry_options import get_entry_option
 from .local_rpc import (
     DEFAULT_LOCAL_RPC_METHODS,
@@ -277,6 +278,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _LOGGER.info("[%s] Device initialized successfully", DOMAIN)
 
+    async_unmerge_official_smartthings_device(hass, entry, device_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     subscription = await async_setup_subscription(
