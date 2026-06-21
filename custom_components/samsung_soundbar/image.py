@@ -4,10 +4,11 @@ from datetime import datetime
 
 from homeassistant.components.image import ImageEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
+from .device_info import build_device_info
+from .entity_updates import register_device_update_listener
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         device = device_config.device
         if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
             entities.append(SoundbarImageEntity(device, "Image URL", hass))
+            register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
     return True
 
@@ -42,13 +44,7 @@ class SoundbarImageEntity(ImageEntity):
         self._attr_name = "Media Artwork"
         self._attr_entity_registry_enabled_default = False
         self._attr_should_poll = True
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.__device.device_id)},
-            name=self.__device.device_name,
-            manufacturer=self.__device.manufacturer,
-            model=self.__device.model,
-            sw_version=self.__device.firmware_version,
-        )
+        self._attr_device_info = build_device_info(self.__device)
 
         self.__updated = None
         self.__using_placeholder = False

@@ -5,7 +5,6 @@ from typing import Any, Mapping
 from homeassistant.components.media_player import MediaPlayerDeviceClass, MediaPlayerEntity
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers import config_validation as cv, entity_platform, selector
 import voluptuous as vol
@@ -16,6 +15,8 @@ from .const import (
     CONF_ENTRY_DEVICE_ID,
     DOMAIN,
 )
+from .device_info import build_device_info
+from .entity_updates import register_device_update_listener
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         device = device_config.device
         if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
             entities.append(SmartThingsSoundbarMediaPlayer(device, session))
+            register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
     return True
 
@@ -111,13 +113,7 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
         self._attr_unique_id = f"{self.device.device_id}_mp"
         self._attr_device_class = MediaPlayerDeviceClass.SPEAKER
 
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.device.device_id)},
-            name=self.device.device_name,
-            manufacturer=self.device.manufacturer,
-            model=self.device.model,
-            sw_version=self.device.firmware_version,
-        )
+        self._attr_device_info = build_device_info(self.device)
 
     async def async_added_to_hass(self) -> None:
         """Register a fast local readback loop for hybrid streaming labels."""

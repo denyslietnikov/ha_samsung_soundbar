@@ -3,11 +3,12 @@ import datetime
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import PERCENTAGE
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
+from .device_info import build_device_info
+from .entity_updates import register_device_update_listener
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 )
             if device.has_status_capability("samsungvd.soundFrom"):
                 entities.append(SoundFromSensor(device, "sound_from", "mdi:speaker"))
+            register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
     return True
 
@@ -38,13 +40,7 @@ class VolumeSensor(SensorEntity):
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
         self.__base_icon = icon_string
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.__device.device_id)},
-            name=self.__device.device_name,
-            manufacturer=self.__device.manufacturer,
-            model=self.__device.model,
-            sw_version=self.__device.firmware_version,
-        )
+        self._attr_device_info = build_device_info(self.__device)
         self.__append_unique_id = append_unique_id
         self._attr_name = "Volume Level"
         self._attr_native_unit_of_measurement = PERCENTAGE
@@ -64,13 +60,7 @@ class InputSourceSensor(SensorEntity):
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sensor_{append_unique_id}"
         self.__base_icon = icon_string
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.__device.device_id)},
-            name=self.__device.device_name,
-            manufacturer=self.__device.manufacturer,
-            model=self.__device.model,
-            sw_version=self.__device.firmware_version,
-        )
+        self._attr_device_info = build_device_info(self.__device)
         self._attr_name = "Input Preset"
 
     @property
@@ -93,13 +83,7 @@ class SoundFromSensor(SensorEntity):
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sensor_{append_unique_id}"
         self.__base_icon = icon_string
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.__device.device_id)},
-            name=self.__device.device_name,
-            manufacturer=self.__device.manufacturer,
-            model=self.__device.model,
-            sw_version=self.__device.firmware_version,
-        )
+        self._attr_device_info = build_device_info(self.__device)
         self._attr_name = "Sound From"
 
     @property

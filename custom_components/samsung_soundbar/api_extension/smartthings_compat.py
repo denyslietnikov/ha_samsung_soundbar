@@ -1,9 +1,10 @@
-"""Compatibility helpers for modern pysmartthings device models."""
+"""Compatibility helpers for pysmartthings 4.x device models."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from pysmartthings import DeviceEvent, Status
 from pysmartthings.exceptions import SmartThingsCommandError
 
 
@@ -16,7 +17,7 @@ _INPUT_SOURCE_COMMAND_VALUE_MAP = {
 
 
 class SmartThingsStatusCompat:
-    """Expose old DeviceEntity status helpers on top of current pysmartthings."""
+    """Expose integration status helpers on top of pysmartthings Device."""
 
     def __init__(self, api: Any, device: Any) -> None:
         """Initialize the status adapter."""
@@ -29,6 +30,29 @@ class SmartThingsStatusCompat:
         """Refresh device status from SmartThings."""
         self._components = await self._api.get_device_status(self._device.device_id)
         self._attributes = self._flatten_attributes()
+
+    def apply_event(self, event: DeviceEvent) -> None:
+        """Apply a SmartThings capability event to the cached status."""
+        component = self._components.setdefault(event.component_id, {})
+        capability_key = self._matching_key(component, event.capability)
+        capability = component.setdefault(capability_key, {})
+        attribute_key = self._matching_key(capability, event.attribute)
+        current_status = capability.get(attribute_key)
+        if current_status is None:
+            capability[attribute_key] = Status(value=event.value, data=event.data)
+        else:
+            current_status.value = event.value
+            current_status.data = event.data
+        self._attributes = self._flatten_attributes()
+
+    @classmethod
+    def _matching_key(cls, values: dict[Any, Any], requested: Any) -> Any:
+        """Return an existing enum/string key matching the requested key."""
+        requested_name = cls._key_name(requested)
+        for key in values:
+            if cls._key_name(key) == requested_name:
+                return key
+        return requested
 
     def _flatten_attributes(self) -> dict[str, Any]:
         """Flatten SmartThings component/capability status by attribute name."""
@@ -63,6 +87,15 @@ class SmartThingsStatusCompat:
         """Return a SmartThings status value."""
         status = self._status(capability, attribute)
         return default if status is None else status.value
+
+    def attribute_value(
+        self,
+        capability: str,
+        attribute: str,
+        default: Any = None,
+    ) -> Any:
+        """Return a capability attribute value for metadata and entities."""
+        return self._value(capability, attribute, default)
 
     def has_capability(self, capability: str, component: str = "main") -> bool:
         """Return whether a capability exists in the last refreshed status."""
@@ -183,7 +216,7 @@ class SmartThingsStatusCompat:
 
 
 class SmartThingsDeviceCompat:
-    """Expose old DeviceEntity methods on top of current pysmartthings."""
+    """Expose the command surface expected by the soundbar integration."""
 
     def __init__(self, api: Any, device: Any) -> None:
         """Initialize the device adapter."""
@@ -195,6 +228,21 @@ class SmartThingsDeviceCompat:
     def device_id(self) -> str:
         """Return device id."""
         return self._device.device_id
+
+    @property
+    def location_id(self) -> str:
+        """Return location id."""
+        return self._device.location_id
+
+    @property
+    def room_id(self) -> str | None:
+        """Return room id."""
+        return self._device.room_id
+
+    @property
+    def raw_device(self) -> Any:
+        """Return the upstream pysmartthings device model."""
+        return self._device
 
     async def command(
         self,

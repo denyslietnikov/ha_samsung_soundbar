@@ -33,6 +33,7 @@ from .const import (
     CONF_ENTRY_SETTINGS_EQ_SELECTOR,
     CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
     CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
+    CONF_LOCATION_ID,
     CONF_LOCAL_FALLBACK_TO_CLOUD,
     CONF_LOCAL_HOST,
     CONF_LOCAL_PORT,
@@ -42,6 +43,7 @@ from .const import (
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
     DOMAIN,
     SMARTTHINGS_OAUTH_SCOPES,
+    SMARTTHINGS_REQUIRED_SCOPES,
 )
 from .entry_options import get_entry_options
 from .local_rpc import LocalRpcError, LocalSoundbarRpcClient
@@ -59,6 +61,7 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
     def __init__(self) -> None:
         super().__init__()
         self._devices: dict[str, str] = {}
+        self._device_locations: dict[str, str] = {}
         self._oauth_data: dict[str, Any] | None = None
 
     @staticmethod
@@ -84,7 +87,7 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         """Create an entry from OAuth data."""
         token = data[CONF_TOKEN]
         granted_scope = token.get("scope")
-        if granted_scope and not set(SMARTTHINGS_OAUTH_SCOPES) <= set(
+        if granted_scope and not set(SMARTTHINGS_REQUIRED_SCOPES) <= set(
             granted_scope.split()
         ):
             return self.async_abort(reason="missing_scopes")
@@ -107,6 +110,9 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         self._devices = {
             device.device_id: getattr(device, "label", None) or device.device_id
             for device in devices
+        }
+        self._device_locations = {
+            device.device_id: device.location_id for device in devices
         }
 
         if not self._devices:
@@ -158,6 +164,9 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
                     **self._oauth_data,
                     CONF_ENTRY_DEVICE_ID: user_input[CONF_ENTRY_DEVICE_ID],
                     CONF_ENTRY_DEVICE_NAME: user_input[CONF_ENTRY_DEVICE_NAME],
+                    CONF_LOCATION_ID: self._device_locations[
+                        user_input[CONF_ENTRY_DEVICE_ID]
+                    ],
                 },
             )
 
@@ -204,6 +213,7 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             **data,
             CONF_ENTRY_DEVICE_ID: device_id,
             CONF_ENTRY_DEVICE_NAME: device_name,
+            CONF_LOCATION_ID: self._device_locations[device_id],
         }
 
         return self.async_update_reload_and_abort(

@@ -18,6 +18,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pysmartthings.exceptions import (
     SmartThingsAuthenticationFailedError,
     SmartThingsConnectionError,
+    SmartThingsError,
     SmartThingsForbiddenError,
 )
 import voluptuous as vol
@@ -52,6 +53,7 @@ from .const import (
     CONF_LOCAL_RPC_VERIFY_SSL,
     CONF_LOCAL_RPC_WRITE_METHOD,
     CONF_LOCAL_RPC_WRITE_PARAMS,
+    CONF_LOCATION_ID,
     CONF_PRESET,
     CONF_WRITE_PROPERTY,
     CONF_WRITE_VALUE,
@@ -72,6 +74,7 @@ from .local_rpc import (
     LocalSoundbarRpcClient,
 )
 from .models import DeviceConfig, SoundbarConfig
+from .subscription import async_remove_subscription, async_setup_subscription
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -164,6 +167,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 api,
                 await api.get_device(device_id),
             )
+            location_id = (
+                entry.data.get(CONF_LOCATION_ID)
+                or smart_things_device.location_id
+            )
+            if location_id != entry.data.get(CONF_LOCATION_ID):
+                hass.config_entries.async_update_entry(
+                    entry,
+                    data={**entry.data, CONF_LOCATION_ID: location_id},
+                )
+            suggested_area = None
+            if smart_things_device.room_id:
+                try:
+                    room = await api.get_room(
+                        location_id,
+                        smart_things_device.room_id,
+                    )
+                except SmartThingsError as err:
+                    _LOGGER.debug(
+                        "[%s] Could not load SmartThings room metadata for %s: %s",
+                        DOMAIN,
+                        device_id,
+                        err,
+                    )
+                else:
+                    suggested_area = room.name
 
         except (
             SmartThingsAuthenticationFailedError,
@@ -237,6 +265,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 entry,
                 CONF_LOCAL_FALLBACK_TO_CLOUD,
             ),
+            suggested_area=suggested_area,
         )
 
         await soundbar_device.update()
@@ -249,6 +278,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("[%s] Device initialized successfully", DOMAIN)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    subscription = await async_setup_subscription(
+        hass,
+        entry,
+        api,
+        domain_config.devices[device_id].device,
+    )
+    if subscription is not None:
+        domain_config.subscriptions[entry.entry_id] = subscription
+
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
@@ -260,6 +299,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     if unload_ok:
         domain_data = hass.data.get(DOMAIN)
         if domain_data:
+            subscription = domain_data.subscriptions.pop(entry.entry_id, None)
+            if subscription is not None:
+                await async_remove_subscription(entry, subscription)
             domain_data.devices.pop(entry.data.get(CONF_ENTRY_DEVICE_ID), None)
             if not domain_data.devices:
                 hass.services.async_remove(DOMAIN, SERVICE_DUMP_DISCOVERY_SNAPSHOT)

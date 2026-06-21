@@ -5,10 +5,11 @@ from homeassistant.components.number import (
     NumberEntityDescription,
     NumberMode,
 )
-from homeassistant.helpers.entity import DeviceInfo
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
+from .device_info import build_device_info
+from .entity_updates import register_device_update_listener
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     "woofer_level",
                 )
             )
+            register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
     return True
 
@@ -50,13 +52,7 @@ class SoundbarWooferNumberEntity(NumberEntity):
         )
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.__device.device_id)},
-            name=self.__device.device_name,
-            manufacturer=self.__device.manufacturer,
-            model=self.__device.model,
-            sw_version=self.__device.firmware_version,
-        )
+        self._attr_device_info = build_device_info(self.__device)
         self.__append_unique_id = append_unique_id
 
     # ---------- GENERAL ---------------
