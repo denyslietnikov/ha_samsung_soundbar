@@ -162,6 +162,7 @@ class SoundbarDevice:
             control_mode: str = CONTROL_MODE_SMARTTHINGS_CLOUD,
             local_rpc: LocalSoundbarRpcClient | None = None,
             local_fallback_to_cloud: bool = True,
+            suggested_area: str | None = None,
     ):
         self.device = device
         self._device_id = self.device.device_id
@@ -171,6 +172,7 @@ class SoundbarDevice:
         self.__control_mode = control_mode
         self.__local_rpc = local_rpc
         self.__local_fallback_to_cloud = local_fallback_to_cloud
+        self.__suggested_area = suggested_area
         self.__local_status: dict[str, Any] = {}
         self.__local_status_updated_at: datetime.datetime | None = None
         self.__local_status_update_lock = asyncio.Lock()
@@ -996,6 +998,25 @@ class SoundbarDevice:
     @property
     def firmware_version(self):
         return self.device.status.ocf_firmware_version
+
+    @property
+    def suggested_area(self) -> str | None:
+        return self.__suggested_area
+
+    @property
+    def smartthings_device(self) -> Any:
+        return getattr(self.device, "raw_device", self.device)
+
+    def status_attribute_value(
+        self,
+        capability: str,
+        attribute: str,
+        default: Any = None,
+    ) -> Any:
+        getter = getattr(self.device.status, "attribute_value", None)
+        if callable(getter):
+            return getter(capability, attribute, default)
+        return default
 
     @property
     def device_id(self):

@@ -18,6 +18,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pysmartthings.exceptions import (
     SmartThingsAuthenticationFailedError,
     SmartThingsConnectionError,
+    SmartThingsError,
     SmartThingsForbiddenError,
 )
 import voluptuous as vol
@@ -175,6 +176,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     entry,
                     data={**entry.data, CONF_LOCATION_ID: location_id},
                 )
+            suggested_area = None
+            if smart_things_device.room_id:
+                try:
+                    room = await api.get_room(
+                        location_id,
+                        smart_things_device.room_id,
+                    )
+                except SmartThingsError as err:
+                    _LOGGER.debug(
+                        "[%s] Could not load SmartThings room metadata for %s: %s",
+                        DOMAIN,
+                        device_id,
+                        err,
+                    )
+                else:
+                    suggested_area = room.name
 
         except (
             SmartThingsAuthenticationFailedError,
@@ -248,6 +265,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 entry,
                 CONF_LOCAL_FALLBACK_TO_CLOUD,
             ),
+            suggested_area=suggested_area,
         )
 
         await soundbar_device.update()

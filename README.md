@@ -16,7 +16,7 @@ This fork mainly focuses on:
 
 ## OAuth Beta Setup
 
-Beta `0.7.0b51` targets Home Assistant `2026.6.1` or newer. This is the first
+Beta `0.7.0b52` targets Home Assistant `2026.6.1` or newer. This is the first
 Home Assistant release that ships `pysmartthings 4.0.1`; the library requires
 Python 3.13 or newer.
 
@@ -27,14 +27,11 @@ Use these scopes for the first beta:
 - `r:devices:*`
 - `x:devices:*`
 - `r:locations:*`
-- `sse`
-- `r:installedapps`
-- `w:installedapps`
 
-Beta `0.7.0b51` adds SmartThings push subscriptions. Existing config entries
-continue to work with polling, but must be reauthenticated once after the
-OAuth-In application is updated with the scopes above to enable immediate
-power, volume, mute, input, and availability updates.
+Do not add `sse`: SmartThings does not expose that privileged scope to
+user-created OAuth-In applications. It is used by Home Assistant's official
+cloud-managed SmartThings application, but custom application credentials
+receive `invalid_scope=sse`. This integration therefore keeps polling active.
 
 When SmartThings asks for a redirect URI, add this exact value, with no trailing slash:
 
@@ -81,7 +78,8 @@ data:
 
 - UI-based setup through Home Assistant
 - SmartThings OAuth with automatic access-token refresh
-- SmartThings event subscriptions with polling fallback
+- SmartThings polling with subscription infrastructure reserved for compatible apps
+- Extended device registry metadata from SmartThings OCF/device status
 - Optional Hybrid Local + SmartThings mode for Q800F media controls
 - Media player controls
 - Sound mode selection

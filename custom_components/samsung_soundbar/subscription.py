@@ -50,8 +50,15 @@ async def async_setup_subscription(
 
     if not set(SMARTTHINGS_REQUIRED_SCOPES) <= granted_scopes:
         _LOGGER.info(
-            "SmartThings push updates disabled for %s: OAuth token lacks SSE scope; "
-            "reauthenticate the integration to enable event-driven updates",
+            "SmartThings push updates disabled for %s: OAuth token lacks required "
+            "device scopes",
+            device.device_name,
+        )
+        return None
+    if "sse" not in granted_scopes:
+        _LOGGER.debug(
+            "SmartThings push updates disabled for %s: public OAuth-In apps do not "
+            "support the privileged SSE scope; polling remains active",
             device.device_name,
         )
         return None

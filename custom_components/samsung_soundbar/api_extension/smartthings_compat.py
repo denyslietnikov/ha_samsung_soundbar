@@ -88,6 +88,15 @@ class SmartThingsStatusCompat:
         status = self._status(capability, attribute)
         return default if status is None else status.value
 
+    def attribute_value(
+        self,
+        capability: str,
+        attribute: str,
+        default: Any = None,
+    ) -> Any:
+        """Return a capability attribute value for metadata and entities."""
+        return self._value(capability, attribute, default)
+
     def has_capability(self, capability: str, component: str = "main") -> bool:
         """Return whether a capability exists in the last refreshed status."""
         capabilities = self._components.get(component, {})
@@ -224,6 +233,16 @@ class SmartThingsDeviceCompat:
     def location_id(self) -> str:
         """Return location id."""
         return self._device.location_id
+
+    @property
+    def room_id(self) -> str | None:
+        """Return room id."""
+        return self._device.room_id
+
+    @property
+    def raw_device(self) -> Any:
+        """Return the upstream pysmartthings device model."""
+        return self._device
 
     async def command(
         self,

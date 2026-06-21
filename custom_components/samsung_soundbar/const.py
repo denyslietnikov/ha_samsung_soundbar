@@ -19,13 +19,8 @@ SMARTTHINGS_REQUIRED_SCOPES = [
     "r:devices:*",
     "x:devices:*",
     "r:locations:*",
-    "sse",
 ]
-SMARTTHINGS_OAUTH_SCOPES = [
-    *SMARTTHINGS_REQUIRED_SCOPES,
-    "r:installedapps",
-    "w:installedapps",
-]
+SMARTTHINGS_OAUTH_SCOPES = [*SMARTTHINGS_REQUIRED_SCOPES]
 
 CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES = "settings_advanced_audio"
 CONF_ENTRY_SETTINGS_EQ_SELECTOR = "settings_eq"
