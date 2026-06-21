@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pysmartthings import SmartThings
@@ -17,3 +17,4 @@ class SoundbarConfig:
     api: SmartThings
     devices: dict
     auth_provider: Any | None = None
+    subscriptions: dict[str, Any] = field(default_factory=dict)

@@ -8,6 +8,7 @@ from homeassistant.helpers.event import async_track_time_interval
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
+from .entity_updates import register_device_update_listener
 from .models import DeviceConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 )
             if device.has_status_capability("samsungvd.soundFrom"):
                 entities.append(SoundFromSensor(device, "sound_from", "mdi:speaker"))
+            register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
     return True
 

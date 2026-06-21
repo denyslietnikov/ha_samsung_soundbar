@@ -7,12 +7,12 @@
   "config_flow": true,
   "documentation": "https://www.example.com",
   "integration_type": "hub",
-  "iot_class": "cloud_polling",
+  "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/samuelspagl/ha_samsung_soundbar/issues",
   "requirements": [
     "pysmartthings==4.0.1"
   ],
-  "version": "0.7.0b50",
+  "version": "0.7.0b51",
   "dependencies": [
     "application_credentials"
   ]

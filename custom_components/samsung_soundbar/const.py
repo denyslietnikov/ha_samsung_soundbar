@@ -9,13 +9,22 @@ CONF_ENTRY_API_KEY = "api_key"
 CONF_ENTRY_DEVICE_ID = "device_id"
 CONF_ENTRY_DEVICE_NAME = "device_name"
 CONF_ENTRY_MAX_VOLUME = "device_volume"
+CONF_INSTALLED_APP_ID = "installed_app_id"
+CONF_LOCATION_ID = "location_id"
+CONF_SUBSCRIPTION_ID = "subscription_id"
 
 SMARTTHINGS_AUTHORIZE_URL = "https://api.smartthings.com/oauth/authorize"
 SMARTTHINGS_TOKEN_URL = "https://auth-global.api.smartthings.com/oauth/token"
-SMARTTHINGS_OAUTH_SCOPES = [
+SMARTTHINGS_REQUIRED_SCOPES = [
     "r:devices:*",
     "x:devices:*",
     "r:locations:*",
+    "sse",
+]
+SMARTTHINGS_OAUTH_SCOPES = [
+    *SMARTTHINGS_REQUIRED_SCOPES,
+    "r:installedapps",
+    "w:installedapps",
 ]
 
 CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES = "settings_advanced_audio"

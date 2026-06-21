@@ -1,6 +1,6 @@
 {
     "application_credentials": {
-        "description": "Erstelle eine SmartThings OAuth-In App mit der SmartThings CLI. Füge diese Redirect URI exakt hinzu: `{redirect_uri}`. Nutze die Scopes `r:devices:*`, `x:devices:*` und `r:locations:*`, und trage danach die erzeugte Client ID und das Client Secret hier ein. [SmartThings CLI Dokumentation]({console_url})"
+        "description": "Erstelle eine SmartThings OAuth-In App mit der SmartThings CLI. Füge diese Redirect URI exakt hinzu: `{redirect_uri}`. Nutze die Scopes `r:devices:*`, `x:devices:*`, `r:locations:*`, `sse`, `r:installedapps` und `w:installedapps`, und trage danach die erzeugte Client ID und das Client Secret hier ein. [SmartThings CLI Dokumentation]({console_url})"
     },
     "config":{
         "step":{

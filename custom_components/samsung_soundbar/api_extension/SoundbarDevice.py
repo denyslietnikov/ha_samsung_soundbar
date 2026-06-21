@@ -12,6 +12,7 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
 )
+from pysmartthings import DeviceEvent
 from pysmartthings.exceptions import (
     SmartThingsAuthenticationFailedError,
     SmartThingsCommandError,
@@ -214,6 +215,8 @@ class SoundbarDevice:
         self.__optimistic_sound_mode_updated_at: datetime.datetime | None = None
         self.__last_known_input_source: str | None = None
         self.__last_known_sound_mode: str | None = None
+        self.__update_listeners: set[Callable[[], None]] = set()
+        self.__cloud_available = True
 
         self.__max_volume = max_volume
 
@@ -290,6 +293,44 @@ class SoundbarDevice:
     @property
     def control_mode(self) -> str:
         return self.__control_mode
+
+    @property
+    def available(self) -> bool:
+        """Return whether either configured transport is available."""
+        return self.__cloud_available or (self.hybrid_mode and self.__local_available)
+
+    def add_update_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """Add a listener notified after push updates."""
+        self.__update_listeners.add(listener)
+        return lambda: self.__update_listeners.discard(listener)
+
+    async def async_handle_smartthings_event(self, event: DeviceEvent) -> None:
+        """Apply a SmartThings push event and notify entities."""
+        apply_event = getattr(self.device.status, "apply_event", None)
+        if callable(apply_event):
+            apply_event(event)
+        else:
+            await self.device.status.refresh()
+
+        self.__set_cloud_available(True)
+        self.__sync_optimistic_mute()
+        if str(getattr(event.attribute, "value", event.attribute)) == "audioTrackData":
+            await self._update_media()
+        self.__notify_update_listeners()
+
+    def handle_smartthings_availability(self, available: bool) -> None:
+        """Apply a SmartThings device-health event."""
+        self.__set_cloud_available(available)
+
+    def __set_cloud_available(self, available: bool) -> None:
+        if self.__cloud_available == available:
+            return
+        self.__cloud_available = available
+        self.__notify_update_listeners()
+
+    def __notify_update_listeners(self) -> None:
+        for listener in tuple(self.__update_listeners):
+            listener()
 
     @property
     def local_available(self) -> bool:

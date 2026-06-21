@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from pysmartthings import DeviceEvent, Status
 from pysmartthings.exceptions import SmartThingsCommandError
 
 
@@ -29,6 +30,29 @@ class SmartThingsStatusCompat:
         """Refresh device status from SmartThings."""
         self._components = await self._api.get_device_status(self._device.device_id)
         self._attributes = self._flatten_attributes()
+
+    def apply_event(self, event: DeviceEvent) -> None:
+        """Apply a SmartThings capability event to the cached status."""
+        component = self._components.setdefault(event.component_id, {})
+        capability_key = self._matching_key(component, event.capability)
+        capability = component.setdefault(capability_key, {})
+        attribute_key = self._matching_key(capability, event.attribute)
+        current_status = capability.get(attribute_key)
+        if current_status is None:
+            capability[attribute_key] = Status(value=event.value, data=event.data)
+        else:
+            current_status.value = event.value
+            current_status.data = event.data
+        self._attributes = self._flatten_attributes()
+
+    @classmethod
+    def _matching_key(cls, values: dict[Any, Any], requested: Any) -> Any:
+        """Return an existing enum/string key matching the requested key."""
+        requested_name = cls._key_name(requested)
+        for key in values:
+            if cls._key_name(key) == requested_name:
+                return key
+        return requested
 
     def _flatten_attributes(self) -> dict[str, Any]:
         """Flatten SmartThings component/capability status by attribute name."""
@@ -195,6 +219,11 @@ class SmartThingsDeviceCompat:
     def device_id(self) -> str:
         """Return device id."""
         return self._device.device_id
+
+    @property
+    def location_id(self) -> str:
+        """Return location id."""
+        return self._device.location_id
 
     async def command(
         self,
