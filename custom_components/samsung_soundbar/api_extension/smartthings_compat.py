@@ -1,4 +1,4 @@
-"""Compatibility helpers for modern pysmartthings device models."""
+"""Compatibility helpers for pysmartthings 4.x device models."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ _INPUT_SOURCE_COMMAND_VALUE_MAP = {
 
 
 class SmartThingsStatusCompat:
-    """Expose old DeviceEntity status helpers on top of current pysmartthings."""
+    """Expose integration status helpers on top of pysmartthings Device."""
 
     def __init__(self, api: Any, device: Any) -> None:
         """Initialize the status adapter."""
@@ -183,7 +183,7 @@ class SmartThingsStatusCompat:
 
 
 class SmartThingsDeviceCompat:
-    """Expose old DeviceEntity methods on top of current pysmartthings."""
+    """Expose the command surface expected by the soundbar integration."""
 
     def __init__(self, api: Any, device: Any) -> None:
         """Initialize the device adapter."""

@@ -2011,6 +2011,15 @@ class SoundbarDevice:
         return {"raw": status_data}
 
     async def get_device_status_raw(self) -> dict[str, Any]:
+        api = getattr(self.__auth_provider, "api", None)
+        get_raw_device_status = getattr(api, "get_raw_device_status", None)
+        if callable(get_raw_device_status):
+            return await self.__call_smartthings(
+                lambda: get_raw_device_status(self._device_id),
+                "get raw device status",
+            )
+
+        # Legacy fallback for non-OAuth construction in diagnostics/tests.
         url = f"https://api.smartthings.com/v1/devices/{self._device_id}/status"
         resp = await self.__get_status_response(url)
         status_data = await resp.json(content_type=None)

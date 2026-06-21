@@ -16,7 +16,9 @@ This fork mainly focuses on:
 
 ## OAuth Beta Setup
 
-Beta `0.7.0b33` targets Home Assistant `2026.1.0` or newer.
+Beta `0.7.0b50` targets Home Assistant `2026.6.1` or newer. This is the first
+Home Assistant release that ships `pysmartthings 4.0.1`; the library requires
+Python 3.13 or newer.
 
 This fork uses SmartThings OAuth instead of a Personal Access Token. Before adding the integration, create a SmartThings OAuth-In application and add its `client_id` and `client_secret` in Home Assistant under Application Credentials for the `Samsung Soundbar` integration.
 

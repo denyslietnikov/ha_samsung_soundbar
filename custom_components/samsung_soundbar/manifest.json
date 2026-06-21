@@ -10,9 +10,9 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/samuelspagl/ha_samsung_soundbar/issues",
   "requirements": [
-    "pysmartthings==3.7.3"
+    "pysmartthings==4.0.1"
   ],
-  "version": "0.7.0b49",
+  "version": "0.7.0b50",
   "dependencies": [
     "application_credentials"
   ]
