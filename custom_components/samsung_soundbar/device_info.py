@@ -25,7 +25,10 @@ def async_unmerge_official_smartthings_device(
     """Split a device previously merged through shared network connections."""
     registry = dr.async_get(hass)
     own_identifier = (DOMAIN, device_id)
-    existing = registry.async_get_device(identifiers={own_identifier})
+    existing = registry.async_get_device_by_identifier(
+        own_identifier,
+        entry.entry_id,
+    )
     if existing is None or not any(
         identifier_domain == "smartthings"
         for identifier_domain, _ in existing.identifiers
@@ -136,4 +139,3 @@ def _clean(value: Any) -> str | None:
 def _normalize_model(value: Any) -> str | None:
     model = _clean(value)
     return model.split("|", maxsplit=1)[0] if model else None
-
