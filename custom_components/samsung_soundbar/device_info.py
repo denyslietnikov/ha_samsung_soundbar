@@ -11,7 +11,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 
 from .api_extension.SoundbarDevice import SoundbarDevice
-from .const import DOMAIN
+from .const import CONTROL_MODE_LOCAL_ONLY, DOMAIN
 
 SMARTTHINGS_CONFIGURATION_URL = "https://account.smartthings.com"
 _LOGGER = logging.getLogger(__name__)
@@ -106,7 +106,11 @@ def build_device_info(device: SoundbarDevice) -> DeviceInfo:
 
     return DeviceInfo(
         identifiers={(DOMAIN, device.device_id)},
-        configuration_url=SMARTTHINGS_CONFIGURATION_URL,
+        configuration_url=(
+            None
+            if device.control_mode == CONTROL_MODE_LOCAL_ONLY
+            else SMARTTHINGS_CONFIGURATION_URL
+        ),
         name=device.device_name,
         manufacturer=manufacturer,
         model=model,

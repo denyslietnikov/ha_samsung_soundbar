@@ -23,6 +23,7 @@ from pysmartthings.exceptions import (
 from .const import SpeakerIdentifier, RearSpeakerMode
 from ..const import (
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+    CONTROL_MODE_LOCAL_ONLY,
     CONTROL_MODE_SMARTTHINGS_CLOUD,
     DOMAIN,
 )
@@ -173,7 +174,9 @@ class SoundbarDevice:
         self.__device_name = device_name
         self.__control_mode = control_mode
         self.__local_rpc = local_rpc
-        self.__local_fallback_to_cloud = local_fallback_to_cloud
+        self.__local_fallback_to_cloud = (
+            local_fallback_to_cloud and control_mode != CONTROL_MODE_LOCAL_ONLY
+        )
         self.__suggested_area = suggested_area
         self.__local_status: dict[str, Any] = {}
         self.__local_status_updated_at: datetime.datetime | None = None
@@ -222,11 +225,15 @@ class SoundbarDevice:
         self.__pending_local_sound_mode: str | None = None
         self.__pending_local_sound_mode_count = 0
         self.__update_listeners: set[Callable[[], None]] = set()
-        self.__cloud_available = True
+        self.__cloud_available = control_mode != CONTROL_MODE_LOCAL_ONLY
 
         self.__max_volume = max_volume
 
     async def update(self):
+        if self.local_only:
+            await self.update_local_status(min_age=None)
+            return
+
         if self.__auth_provider is not None:
             await self.__auth_provider.async_get_access_token()
 
@@ -254,6 +261,8 @@ class SoundbarDevice:
         description: str,
     ) -> _T:
         """Call SmartThings once, refresh auth on 401/403, then fail for reauth."""
+        if self.local_only:
+            raise HomeAssistantError("SmartThings is disabled in Local-only mode")
         try:
             return await action()
         except (
@@ -292,9 +301,16 @@ class SoundbarDevice:
     @property
     def hybrid_mode(self) -> bool:
         return bool(
-            self.__control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
+            self.__control_mode in (
+                CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+                CONTROL_MODE_LOCAL_ONLY,
+            )
             and self.__local_rpc is not None
         )
+
+    @property
+    def local_only(self) -> bool:
+        return self.__control_mode == CONTROL_MODE_LOCAL_ONLY
 
     @property
     def control_mode(self) -> str:
@@ -358,6 +374,8 @@ class SoundbarDevice:
         if not self.hybrid_mode or self.__local_rpc is None:
             return
 
+        previous_status = self.__local_status.copy()
+        was_available = self.__local_available
         try:
             local_status = await self.__local_rpc.status()
             sound_mode_readback_missing = False
@@ -412,9 +430,15 @@ class SoundbarDevice:
                 self.__expire_optimistic_sound_mode()
             else:
                 self.__sync_optimistic_sound_mode()
+            if self.local_only and (
+                not was_available or previous_status != self.__local_status
+            ):
+                self.__notify_update_listeners()
         except LocalRpcError as err:
             self.__local_available = False
             self.__local_last_error = str(err)
+            if self.local_only and was_available:
+                self.__notify_update_listeners()
             log.debug(
                 "[%s] Local RPC status update failed for %s: %s",
                 DOMAIN,
@@ -449,6 +473,8 @@ class SoundbarDevice:
             if min_age is not None and self.__has_fresh_local_media_status(min_age):
                 return
 
+            previous_status = self.__local_status.copy()
+            was_available = self.__local_available
             try:
                 (
                     local_power,
@@ -471,6 +497,8 @@ class SoundbarDevice:
                     _LOCAL_STATUS_CACHE_TIMEOUT
                 )
                 self.__local_last_error = str(err)
+                if self.local_only and was_available != self.__local_available:
+                    self.__notify_update_listeners()
                 log.debug(
                     "[%s] Local RPC media state update failed for %s: %s",
                     DOMAIN,
@@ -518,7 +546,15 @@ class SoundbarDevice:
             self.__local_status_updated_at = datetime.datetime.now()
             self.__local_available = True
             self.__local_last_error = None
-            if previous_sound_mode != self.__local_status.get("sound_mode"):
+            if (
+                previous_sound_mode != self.__local_status.get("sound_mode")
+                or (
+                    self.local_only
+                    and (
+                        not was_available or previous_status != self.__local_status
+                    )
+                )
+            ):
                 self.__notify_update_listeners()
 
     async def __try_local_rpc(
@@ -545,7 +581,7 @@ class SoundbarDevice:
                 self.device_name,
                 err,
             )
-            if self.__local_fallback_to_cloud:
+            if self.__local_fallback_to_cloud and not self.local_only:
                 return False
             raise HomeAssistantError(
                 f"Local soundbar RPC failed during {description}: {err}"
@@ -1397,6 +1433,10 @@ class SoundbarDevice:
             detail_name
         ):
             return streaming_detail_name
+        if self.local_only and not detail_name and self.__local_value("power") != "powerOff":
+            return streaming_detail_name or (
+                "External Device" if self.__local_value("input_source") else None
+            )
         return detail_name or streaming_detail_name
 
     @property
@@ -2291,6 +2331,8 @@ class SoundbarDevice:
         return resp
 
     async def __auth_headers(self, force_refresh: bool = False) -> dict[str, str]:
+        if self.local_only:
+            raise HomeAssistantError("SmartThings is disabled in Local-only mode")
         if self.__auth_provider is not None:
             api_key = await self.__auth_provider.async_get_access_token(
                 force_refresh=force_refresh

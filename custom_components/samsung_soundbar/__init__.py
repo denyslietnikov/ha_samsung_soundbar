@@ -58,6 +58,7 @@ from .const import (
     CONF_WRITE_PROPERTY,
     CONF_WRITE_VALUE,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+    CONTROL_MODE_LOCAL_ONLY,
     DOMAIN,
     EXECUTE_PAYLOAD_PRESETS,
     SERVICE_DUMP_DISCOVERY_SNAPSHOT,
@@ -67,6 +68,7 @@ from .const import (
 )
 from .device_info import async_unmerge_official_smartthings_device
 from .entry_options import get_entry_option
+from .local_device import LocalDevice
 from .local_rpc import (
     DEFAULT_LOCAL_RPC_METHODS,
     DEFAULT_LOCAL_RPC_PORT,
@@ -135,6 +137,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Samsung Soundbar from config entry."""
 
     _LOGGER.info("[%s] Setting up entry", DOMAIN)
+
+    if get_entry_option(entry, CONF_CONTROL_MODE) == CONTROL_MODE_LOCAL_ONLY:
+        return await _async_setup_local_only_entry(hass, entry)
 
     if CONF_TOKEN not in entry.data:
         raise ConfigEntryAuthFailed(
@@ -295,6 +300,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_setup_local_only_entry(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> bool:
+    """Load an existing entry without creating an OAuth or SmartThings client."""
+    device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
+    local_host = str(get_entry_option(entry, CONF_LOCAL_HOST)).strip()
+    if not device_id or not local_host:
+        raise ConfigEntryNotReady("Local soundbar device ID and host are required")
+
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = SoundbarConfig(None, {})
+    domain_config: SoundbarConfig = hass.data[DOMAIN]
+    _async_register_services(hass)
+
+    if device_id not in domain_config.devices:
+        verify_ssl = get_entry_option(entry, CONF_LOCAL_VERIFY_SSL)
+        local_rpc = LocalSoundbarRpcClient(
+            local_host,
+            async_get_clientsession(hass, verify_ssl=verify_ssl),
+            port=get_entry_option(entry, CONF_LOCAL_PORT),
+            verify_ssl=verify_ssl,
+            timeout=get_entry_option(entry, CONF_LOCAL_TIMEOUT),
+        )
+        soundbar_device = SoundbarDevice(
+            device=LocalDevice(device_id),
+            session=async_get_clientsession(hass),
+            auth_provider=None,
+            max_volume=get_entry_option(entry, CONF_ENTRY_MAX_VOLUME),
+            device_name=entry.data.get(CONF_ENTRY_DEVICE_NAME) or local_host,
+            enable_eq=False,
+            enable_advanced_audio=False,
+            enable_soundmode=False,
+            enable_woofer=False,
+            control_mode=CONTROL_MODE_LOCAL_ONLY,
+            local_rpc=local_rpc,
+            local_fallback_to_cloud=False,
+        )
+        await soundbar_device.update()
+        domain_config.devices[device_id] = DeviceConfig(entry.data, soundbar_device)
+
+    async_unmerge_official_smartthings_device(hass, entry, device_id)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    return True
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
@@ -371,6 +422,7 @@ def _async_create_dump_execute_payload_service(hass: HomeAssistant):
             domain_config,
             call.data.get(CONF_HA_DEVICE_ID),
         )
+        _require_cloud_device(soundbar_device)
 
         href = call.data.get(CONF_HREF)
         preset = call.data.get(CONF_PRESET, "all")
@@ -410,6 +462,7 @@ def _async_create_dump_status_summary_service(hass: HomeAssistant):
             domain_config,
             call.data.get(CONF_HA_DEVICE_ID),
         )
+        _require_cloud_device(soundbar_device)
         return await soundbar_device.async_dump_status_summary(
             include_null=call.data[CONF_INCLUDE_NULL],
         )
@@ -430,6 +483,7 @@ def _async_create_dump_discovery_snapshot_service(hass: HomeAssistant):
             domain_config,
             call.data.get(CONF_HA_DEVICE_ID),
         )
+        _require_cloud_device(soundbar_device)
         return await soundbar_device.async_dump_discovery_snapshot(
             include_null=call.data[CONF_INCLUDE_NULL],
             include_raw_status=call.data[CONF_INCLUDE_RAW_STATUS],
@@ -533,6 +587,13 @@ def _redact_rpc_params(value):
     if isinstance(value, list):
         return [_redact_rpc_params(item) for item in value]
     return value
+
+
+def _require_cloud_device(device: SoundbarDevice) -> None:
+    if device.local_only:
+        raise HomeAssistantError(
+            "This diagnostic action requires SmartThings Cloud; use dump_local_rpc"
+        )
 
 
 def _async_resolve_service_device(

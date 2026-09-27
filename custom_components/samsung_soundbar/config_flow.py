@@ -41,6 +41,7 @@ from .const import (
     CONF_LOCAL_VERIFY_SSL,
     CONTROL_MODE_LABELS,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+    CONTROL_MODE_LOCAL_ONLY,
     DOMAIN,
     SMARTTHINGS_OAUTH_SCOPES,
     SMARTTHINGS_REQUIRED_SCOPES,
@@ -238,7 +239,10 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
             options = get_entry_options(self.config_entry)
             options.update(user_input)
 
-            if options[CONF_CONTROL_MODE] == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS:
+            if options[CONF_CONTROL_MODE] in (
+                CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+                CONTROL_MODE_LOCAL_ONLY,
+            ):
                 local_host = str(options.get(CONF_LOCAL_HOST, "")).strip()
                 options[CONF_LOCAL_HOST] = local_host
                 if not local_host:

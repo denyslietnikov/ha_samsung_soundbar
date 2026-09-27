@@ -6,8 +6,14 @@ from homeassistant.components.image import ImageEntity
 from homeassistant.core import HomeAssistant
 
 from .api_extension.SoundbarDevice import SoundbarDevice
-from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
+from .const import (
+    CONF_CONTROL_MODE,
+    CONF_ENTRY_DEVICE_ID,
+    CONTROL_MODE_LOCAL_ONLY,
+    DOMAIN,
+)
 from .device_info import build_device_info
+from .entry_options import get_entry_option
 from .entity_updates import register_device_update_listener
 from .models import DeviceConfig
 
@@ -20,6 +26,10 @@ _TRANSPARENT_PNG = base64.b64decode(
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
+    if get_entry_option(config_entry, CONF_CONTROL_MODE) == CONTROL_MODE_LOCAL_ONLY:
+        async_add_entities([])
+        return True
+
     domain_data = hass.data[DOMAIN]
 
     entities = []

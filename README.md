@@ -1,100 +1,166 @@
-# YASSI: Yet Another Samsung Soundbar Integration (Home Assistant)
+# Samsung Soundbar for Home Assistant
 
-A maintained fork of YASSI focused on compatibility with newer Home Assistant versions while preserving the original functionality and feature set.
+Home Assistant custom integration for Samsung soundbars. It combines the
+public SmartThings API with confirmed local JSON-RPC control where the
+soundbar supports it.
 
-This integration provides advanced Samsung Soundbar control through SmartThings, including sound modes, equalizer settings, subwoofer control, advanced audio enhancements, and media player features.
+The project is developed independently and currently focuses on reliable
+operation with recent Home Assistant releases and Samsung HW-Q800F.
 
-## Fork Goals
+## Highlights
 
-This fork mainly focuses on:
+- SmartThings OAuth setup with access-token refresh and reauthentication.
+- Media player control for power, volume, mute, playback, source and sound
+  mode when the device exposes the required capability.
+- Hybrid LAN control for confirmed Q800F media controls.
+- Optional soundbar entities for advanced audio, EQ and woofer control where
+  the device profile supports them.
+- Diagnostics for SmartThings status, execute payloads and local JSON-RPC.
 
-- Home Assistant 2026.x compatibility
-- Fixing deprecated API usage
-- Restoring OAuth/config flow support without SmartThings PATs
-- Improving long-term maintainability
-- Preserving compatibility with modern pysmartthings versions
+## Requirements
 
-## OAuth Beta Setup
+- Home Assistant `2026.6.1` or newer.
+- Integration version `0.7.0b63` uses `pysmartthings 4.0.3`.
+- SmartThings OAuth-In application for SmartThings Cloud or Hybrid mode.
+- For Hybrid or Local-only mode: the soundbar reachable on the local network
+  with IP Control enabled.
 
-Beta `0.7.0b62` targets Home Assistant `2026.6.1` or newer. This is the first
-Home Assistant release that ships `pysmartthings 4.0.1`; the library requires
-Python 3.13 or newer.
+## Control Modes
 
-This fork uses SmartThings OAuth instead of a Personal Access Token. Before adding the integration, create a SmartThings OAuth-In application and add its `client_id` and `client_secret` in Home Assistant under Application Credentials for the `Samsung Soundbar` integration.
+| Mode | Status | Account and OAuth | Primary state and controls | Q800F notes |
+| --- | --- | --- | --- | --- |
+| SmartThings Cloud | Available | Required | Public SmartThings capabilities | Source and sound-mode write support depends on the device profile. |
+| Hybrid Local + SmartThings Cloud | Available | Required | Local JSON-RPC for media controls; SmartThings for setup, fallback and cloud-only features | Recommended for Q800F. |
+| Local only | Available for existing entries | Required only for the initial entry creation | Local JSON-RPC only | Select in Options after the soundbar has been added; no SmartThings requests during setup, reload or operation in this mode. |
 
-Use these scopes for the first beta:
+An existing entry can switch to **Local only** in Options after configuring a
+working local host. Its existing device and entity IDs are retained. OAuth-free
+first-time setup and removal of stored OAuth credentials are not implemented
+yet; do not delete the entry to switch modes. Cloud-only switches and artwork
+are not available in Local-only mode.
 
-- `r:devices:*`
-- `x:devices:*`
-- `r:locations:*`
+## Installation
 
-Do not add `sse`: SmartThings does not expose that privileged scope to
-user-created OAuth-In applications. It is used by Home Assistant's official
-cloud-managed SmartThings application, but custom application credentials
-receive `invalid_scope=sse`. This integration therefore keeps polling active.
+### HACS
 
-When SmartThings asks for a redirect URI, add this exact value, with no trailing slash:
+1. In HACS, open **Integrations** and add a custom repository.
+2. Use `https://github.com/denyslietnikov/ha_samsung_soundbar` with category
+   **Integration**.
+3. Install **Samsung Soundbar** and restart Home Assistant.
+4. Add **Samsung Soundbar** from **Settings -> Devices & services**.
+
+### Manual installation
+
+Copy `custom_components/samsung_soundbar` to the same path in your Home
+Assistant configuration directory, restart Home Assistant, then add the
+integration from the UI.
+
+## SmartThings Cloud Setup
+
+Create a SmartThings OAuth-In application and register the resulting Client ID
+and Client Secret in Home Assistant Application Credentials when prompted.
+
+Configure this exact redirect URI in the SmartThings application:
 
 ```text
 https://my.home-assistant.io/redirect/oauth
 ```
 
-If SmartThings shows `'redirect_uri' could not be validated`, the OAuth-In App does not contain the exact redirect URI above. Update or recreate the SmartThings OAuth-In App, then retry the Home Assistant flow.
+Request these scopes:
 
-After credentials are saved, add the integration from the Home Assistant UI, sign in with Samsung, and select the soundbar device.
+- `r:devices:*`
+- `x:devices:*`
+- `r:locations:*`
 
-## Q800F Hybrid Mode
+Do not request `sse`. SmartThings does not grant that privileged scope to
+user-created OAuth-In applications, so this integration uses polling.
 
-For Samsung HW-Q800F and compatible 2024/2025 soundbars, the recommended beta mode is `Hybrid Local + SmartThings`.
+After credentials are configured, add the integration, complete Samsung sign
+in, and select the soundbar.
 
-SmartThings OAuth is still used for account/device setup, fallback, and legacy advanced audio switches. Local control uses the soundbar JSON-RPC API over LAN for media-player state and commands:
+## Q800F Hybrid Setup
+
+Hybrid mode uses SmartThings OAuth for device discovery and optional cloud
+features, while the following media controls use local JSON-RPC over LAN:
 
 - power
-- volume
-- mute
+- volume and mute
 - input source
 - sound mode
-- codec readback
+- codec and streaming-source readback
 
-To enable it, open the integration options in Home Assistant and set:
+After adding the integration, open its options and select **Hybrid Local +
+SmartThings Cloud**. Configure:
 
-- Control mode: `hybrid_local_smartthings`
-- Local soundbar host/IP: the soundbar IP address, for example `192.168.88.26`
-- Local RPC port: `1516`
-- Verify local SSL certificate: off
-- Fallback to SmartThings Cloud: on
+- local soundbar host/IP;
+- local RPC port: `1516`;
+- local SSL verification: normally off for Samsung's local certificate;
+- local RPC timeout;
+- optional SmartThings Cloud fallback.
 
-The soundbar must be added to SmartThings, connected to Wi-Fi, and have IP Control enabled in the SmartThings mobile app. The local AccessToken is created by the soundbar at runtime and is not stored in Home Assistant config.
+The local AccessToken is created by the soundbar at runtime. It is not the
+SmartThings OAuth token and is not stored in the Home Assistant configuration.
 
-Diagnostic action:
+For Q800F, Hybrid mode is the recommended currently available mode. It gives
+reliable local readback for `Input Preset`, `Sound Mode`, volume, mute and
+streaming source labels such as AirPlay, Google Cast and Roon.
+
+## Feature Availability
+
+Features are created only when the device exposes the corresponding capability
+or confirmed local transport support. Exact availability varies by model and
+firmware.
+
+| Feature | SmartThings Cloud | Hybrid Q800F |
+| --- | --- | --- |
+| Power, volume and mute | Available when publicly exposed | Local first with Cloud fallback |
+| Input Preset | Read-only for Q800F | Writable through local RPC |
+| Sound Mode | Capability-dependent | Writable with local readback |
+| Sound From | SmartThings status when available | Local streaming-source mapping |
+| Bass Mode, Night Mode, Voice Amplifier, Virtual | Optional optimistic cloud controls | Same cloud-backed behavior |
+| Woofer, EQ and other advanced controls | Device/profile-dependent | Device/profile-dependent |
+| Album artwork | Depends on media metadata supplied by SmartThings | No confirmed local artwork source |
+
+## Diagnostics
+
+The integration provides diagnostic actions under the `samsung_soundbar`
+domain. They are intended for investigating capability differences between
+models and firmware versions.
+
+Example local JSON-RPC probe:
 
 ```yaml
 action: samsung_soundbar.dump_local_rpc
 data:
-  host: 192.168.88.26
+  host: 192.168.0.10
 ```
 
-## Features
+The result includes power, volume, mute, input source, sound mode, codec and
+local connection errors. Do not publish diagnostic output containing tokens or
+private network details.
 
-- UI-based setup through Home Assistant
-- SmartThings OAuth with automatic access-token refresh
-- SmartThings polling with subscription infrastructure reserved for compatible apps
-- Extended device registry metadata from SmartThings OCF/device status
-- Optional Hybrid Local + SmartThings mode for Q800F media controls
-- Media player controls
-- Sound mode selection
-- Equalizer & subwoofer controls
-- Night mode & voice amplification switches
-- Advanced audio controls
-- SmartThings integration support
-- Multiple device support
+## Limitations
 
-## Credits
+- The SmartThings mobile app can use private Samsung APIs that are not
+  available to this integration through public OAuth.
+- A command returning `COMPLETED` is not sufficient to create a stateful Home
+  Assistant entity; the integration also requires reliable state readback.
+- SmartThings Cloud features require valid OAuth credentials and remain subject
+  to Samsung API availability and policy.
 
-Original project created by @samuelspagl.
+## Attribution
 
-Special thanks to:
-- @PiotrMachowski
-- @thierryBourbon
+This project retains code and design foundations from the following MIT
+licensed Samsung soundbar integrations:
 
-for the original ideas and groundwork around Samsung Soundbar integrations for Home Assistant.
+- [samuelspagl/ha_samsung_soundbar](https://github.com/samuelspagl/ha_samsung_soundbar)
+- [LEOBOESE/ha_samsung_soundbar](https://github.com/LEOBOESE/ha_samsung_soundbar)
+- [ZtF/hass-samsung-soundbar-local](https://github.com/ZtF/hass-samsung-soundbar-local)
+
+Original contributors include Samuel Spagl, Piotr Machowski and
+Thierry Bourbon. Their attribution and the repository's MIT license are
+preserved.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

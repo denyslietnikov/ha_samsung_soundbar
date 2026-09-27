@@ -28,7 +28,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 entities.append(
                     InputSourceSensor(device, "input_preset", "mdi:video-input-hdmi")
                 )
-            if device.has_status_capability("samsungvd.soundFrom"):
+            if device.local_only or device.has_status_capability("samsungvd.soundFrom"):
                 entities.append(SoundFromSensor(device, "sound_from", "mdi:speaker"))
             register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)

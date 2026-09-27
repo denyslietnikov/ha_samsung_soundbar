@@ -14,7 +14,7 @@ class DeviceConfig:
 
 @dataclass
 class SoundbarConfig:
-    api: SmartThings
+    api: SmartThings | None
     devices: dict
     auth_provider: Any | None = None
     subscriptions: dict[str, Any] = field(default_factory=dict)
