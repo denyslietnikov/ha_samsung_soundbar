@@ -27,6 +27,8 @@ from pysmartthings.exceptions import (
 from .const import (
     CONF_CONTROL_MODE,
     CONF_ENTRY_DEVICE_ID,
+    CONF_ENTRY_API_KEY,
+    CONF_CLOUD_INTEGRATION,
     CONF_ENTRY_MAX_VOLUME,
     CONF_ENTRY_DEVICE_NAME,
     CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
@@ -34,8 +36,11 @@ from .const import (
     CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
     CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
     CONF_LOCATION_ID,
+    CONF_INSTALLED_APP_ID,
+    CONF_SUBSCRIPTION_ID,
     CONF_LOCAL_FALLBACK_TO_CLOUD,
     CONF_LOCAL_HOST,
+    CONF_LOCAL_IDENTITY,
     CONF_LOCAL_PORT,
     CONF_LOCAL_TIMEOUT,
     CONF_LOCAL_VERIFY_SSL,
@@ -48,6 +53,8 @@ from .const import (
 )
 from .entry_options import get_entry_options
 from .local_rpc import LocalRpcError, LocalSoundbarRpcClient
+from .local_identity import LocalIdentityError, async_read_local_identity, identities_match
+from .subscription import async_remove_subscription
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -228,6 +235,9 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
 class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
     """Handle Samsung Soundbar options."""
 
+    _pending_options: dict[str, Any] | None = None
+    _pending_identity: dict[str, str] | None = None
+
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,
@@ -259,8 +269,30 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                         )
                         errors["base"] = "cannot_connect"
 
+            if not errors and options[CONF_CONTROL_MODE] == CONTROL_MODE_LOCAL_ONLY:
+                try:
+                    identity = await self._async_read_identity(options)
+                except LocalIdentityError:
+                    errors["base"] = "identity_unavailable"
+                else:
+                    saved = self.config_entry.options.get(CONF_LOCAL_IDENTITY)
+                    if saved and not identities_match(saved, identity):
+                        errors["base"] = "identity_mismatch"
+                    elif not saved:
+                        self._pending_options = options
+                        self._pending_identity = identity
+                        return self.async_show_form(
+                            step_id="confirm_local_identity",
+                            description_placeholders={
+                                "identity": next(iter(identity.values())),
+                                "host": options[CONF_LOCAL_HOST],
+                            },
+                        )
+                    else:
+                        options[CONF_LOCAL_IDENTITY] = identity
+
             if not errors:
-                return self.async_create_entry(title="", data=options)
+                return await self._async_save_options(options)
         else:
             options = get_entry_options(self.config_entry)
 
@@ -269,6 +301,74 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
             data_schema=self._options_schema(options),
             errors=errors,
         )
+
+    async def async_step_confirm_local_identity(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Explicitly bind a legacy cloud entry to a local physical device."""
+        options = self._pending_options
+        expected = self._pending_identity
+        if options is None or expected is None:
+            return await self.async_step_init()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                await self._async_validate_local_rpc(options)
+                observed = await self._async_read_identity(options)
+            except (LocalRpcError, LocalIdentityError):
+                errors["base"] = "identity_unavailable"
+            else:
+                if not identities_match(expected, observed):
+                    errors["base"] = "identity_mismatch"
+                else:
+                    options[CONF_LOCAL_IDENTITY] = observed
+                    return await self._async_save_options(options)
+        return self.async_show_form(
+            step_id="confirm_local_identity",
+            errors=errors,
+            description_placeholders={
+                "identity": next(iter(expected.values())),
+                "host": options[CONF_LOCAL_HOST],
+            },
+        )
+
+    async def _async_read_identity(self, options: dict[str, Any]) -> dict[str, str]:
+        session = async_get_clientsession(self.hass)
+        return await async_read_local_identity(
+            session, options[CONF_LOCAL_HOST], options[CONF_LOCAL_TIMEOUT]
+        )
+
+    async def _async_save_options(self, options: dict[str, Any]) -> ConfigFlowResult:
+        cloud_keys = {
+            CONF_TOKEN,
+            CONF_ENTRY_API_KEY,
+            CONF_CLOUD_INTEGRATION,
+            CONF_LOCATION_ID,
+            CONF_INSTALLED_APP_ID,
+            CONF_SUBSCRIPTION_ID,
+            "auth_implementation",
+        }
+        if (
+            options[CONF_CONTROL_MODE] == CONTROL_MODE_LOCAL_ONLY
+            and cloud_keys & self.config_entry.data.keys()
+        ):
+            runtime = self.hass.data.get(DOMAIN)
+            subscription = (
+                runtime.subscriptions.get(self.config_entry.entry_id)
+                if runtime is not None
+                else None
+            )
+            if subscription is not None:
+                await async_remove_subscription(self.config_entry, subscription)
+            new_data = {
+                key: value
+                for key, value in self.config_entry.data.items()
+                if key not in cloud_keys
+            }
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, data=new_data, options=options
+            )
+        return self.async_create_entry(title="", data=options)
 
     async def _async_validate_local_rpc(self, options: dict[str, Any]) -> None:
         """Validate local JSON-RPC options."""

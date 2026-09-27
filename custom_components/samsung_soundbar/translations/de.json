@@ -52,9 +52,15 @@
     "options": {
         "error": {
             "cannot_connect": "Verbindung zur lokalen Soundbar RPC API fehlgeschlagen. Prüfe IP Adresse, Port, Netzwerk und die IP Control Einstellung.",
+            "identity_unavailable": "Keine stabile lokale Gerätekennung gefunden. Prüfe die Ports 8001 und 9110.",
+            "identity_mismatch": "Dieser Host gehört zu einer anderen Soundbar. Das vorhandene Home Assistant Gerät wurde nicht geändert.",
             "required": "Dieses Feld ist für den ausgewählten Steuerungsmodus erforderlich."
         },
         "step": {
+            "confirm_local_identity": {
+                "title": "Lokale Soundbar bestätigen",
+                "description": "Dieses Gerät auf lokale Steuerung über {host} umstellen? Lokale Kennung: {identity}. Die SmartThings Autorisierung wird entfernt und muss für einen späteren Cloud Modus erneut eingerichtet werden."
+            },
             "init": {
                 "data": {
                     "control_mode": "Steuerungsmodus",

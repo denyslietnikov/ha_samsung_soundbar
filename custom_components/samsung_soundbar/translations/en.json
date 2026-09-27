@@ -52,9 +52,15 @@
     "options": {
         "error": {
             "cannot_connect": "Could not connect to the local soundbar RPC API. Check the IP address, port, network, and IP Control setting.",
+            "identity_unavailable": "Could not read a stable local device identity. Check access to ports 8001 or 9110.",
+            "identity_mismatch": "This host belongs to a different soundbar. The existing Home Assistant device was not changed.",
             "required": "This field is required for the selected control mode."
         },
         "step": {
+            "confirm_local_identity": {
+                "title": "Confirm local soundbar",
+                "description": "Switch this existing device to local control at {host}? Local identifier: {identity}. SmartThings authorization will be removed and must be completed again to return to a cloud mode."
+            },
             "init": {
                 "data": {
                     "control_mode": "Control mode",
