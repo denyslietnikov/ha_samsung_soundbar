@@ -20,7 +20,7 @@ def register_device_update_listener(
     tracked_entities = tuple(entities)
     for entity in tracked_entities:
         entity._attr_available = device.available
-        if device.local_only:
+        if device.hybrid_mode:
             entity._attr_should_poll = False
 
     @callback

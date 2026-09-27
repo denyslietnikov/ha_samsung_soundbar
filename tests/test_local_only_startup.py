@@ -8,7 +8,6 @@ from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.samsung_soundbar as integration
 from custom_components.samsung_soundbar import (
-    image as image_platform,
     media_player as media_player_platform,
     number as number_platform,
     select as select_platform,
@@ -93,6 +92,12 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         self.device_registry = patch.object(
             integration, "async_unmerge_official_smartthings_device"
         )
+        self.entity_registry = MagicMock()
+        self.entity_registry.async_get_entity_id.return_value = None
+        self.entity_registry.async_get.return_value.config_entry_id = self.entry.entry_id
+        self.entity_registry_get = patch.object(
+            integration.er, "async_get", return_value=self.entity_registry
+        )
         self.services = patch.object(integration, "_async_register_services")
         self.timer = patch.object(
             integration, "async_track_time_interval", return_value=MagicMock()
@@ -103,6 +108,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
             self.local_client,
             self.client_session,
             self.device_registry,
+            self.entity_registry_get,
             self.services,
             self.timer,
         ):
@@ -124,6 +130,27 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         self.assertEqual(self.session.get.await_count, 0)
         self.assertEqual(self.session.post.await_count, 0)
         self.assertEqual(self.timer_mock.call_count, 2)
+        self.assertNotIn("image", integration.PLATFORMS)
+
+    async def test_removes_only_legacy_artwork_entity(self) -> None:
+        self.entity_registry.async_get_entity_id.return_value = "image.soundbar_artwork"
+
+        await async_setup_entry(self.hass, self.entry)
+
+        self.entity_registry.async_get_entity_id.assert_called_once_with(
+            "image", DOMAIN, "existing-smartthings-id_sw_Image URL"
+        )
+        self.entity_registry.async_remove.assert_called_once_with(
+            "image.soundbar_artwork"
+        )
+
+    async def test_does_not_remove_artwork_from_another_entry(self) -> None:
+        self.entity_registry.async_get_entity_id.return_value = "image.soundbar_artwork"
+        self.entity_registry.async_get.return_value.config_entry_id = "other-entry"
+
+        await async_setup_entry(self.hass, self.entry)
+
+        self.entity_registry.async_remove.assert_not_called()
 
     async def test_local_failure_recovers_without_cloud_fallback(self) -> None:
         self.rpc.status.side_effect = [LocalRpcError("offline"), LOCAL_STATUS]
@@ -161,7 +188,6 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
             "sensor": sensor_platform,
             "switch": switch_platform,
             "number": number_platform,
-            "image": image_platform,
         }
         with (
             patch.object(media_player_platform, "addServices"),
@@ -250,14 +276,8 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         sound_from = sensor_platform.SoundFromSensor(
             device, "sound_from", "mdi:speaker"
         )
-        with (
-            patch.object(media_player_platform, "async_track_time_interval") as media_timer,
-            patch.object(sensor_platform, "async_track_time_interval") as sensor_timer,
-        ):
-            await player.async_added_to_hass()
-            await sound_from.async_added_to_hass()
-        media_timer.assert_not_called()
-        sensor_timer.assert_not_called()
+        self.assertFalse(hasattr(player, "_async_update_local_input_source"))
+        self.assertFalse(hasattr(sound_from, "_async_update_local_input_source"))
 
     async def test_local_command_failure_cannot_use_cloud(self) -> None:
         await async_setup_entry(self.hass, self.entry)

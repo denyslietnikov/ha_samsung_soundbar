@@ -15,7 +15,11 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
 )
-from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from pysmartthings.exceptions import (
@@ -84,8 +88,9 @@ from .subscription import async_remove_subscription, async_setup_subscription
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "switch", "image", "number", "select", "sensor"]
+PLATFORMS = ["media_player", "switch", "number", "select", "sensor"]
 LOCAL_ONLY_POLL_INTERVAL = datetime.timedelta(seconds=2)
+HYBRID_CLOUD_POLL_INTERVAL = datetime.timedelta(seconds=15)
 
 DUMP_EXECUTE_PAYLOAD_SCHEMA = vol.Schema(
     {
@@ -141,6 +146,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Samsung Soundbar from config entry."""
 
     _LOGGER.info("[%s] Setting up entry", DOMAIN)
+    _async_remove_legacy_artwork_entity(hass, entry)
 
     if get_entry_option(entry, CONF_CONTROL_MODE) == CONTROL_MODE_LOCAL_ONLY:
         return await _async_setup_local_only_entry(hass, entry)
@@ -163,6 +169,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _async_register_services(hass)
 
     device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
+    control_mode = get_entry_option(entry, CONF_CONTROL_MODE)
 
     if device_id not in domain_config.devices:
 
@@ -239,7 +246,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise
 
         session = async_get_clientsession(hass)
-        control_mode = get_entry_option(entry, CONF_CONTROL_MODE)
         local_rpc_client = None
         if control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS:
             local_host = str(get_entry_option(entry, CONF_LOCAL_HOST)).strip()
@@ -299,9 +305,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if subscription is not None:
         domain_config.subscriptions[entry.entry_id] = subscription
 
+    if (
+        control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
+        and domain_config.devices[device_id].device.hybrid_mode
+    ):
+        soundbar_device = domain_config.devices[device_id].device
+        _async_schedule_local_polling(hass, entry, soundbar_device)
+        _async_schedule_hybrid_cloud_polling(hass, entry, soundbar_device)
+
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
+
+
+def _async_remove_legacy_artwork_entity(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Remove the old image entity without touching media player artwork."""
+    device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
+    if not device_id:
+        return
+    registry = er.async_get(hass)
+    unique_id = f"{device_id}_sw_Image URL"
+    if entity_id := registry.async_get_entity_id("image", DOMAIN, unique_id):
+        entity = registry.async_get(entity_id)
+        if entity is not None and entity.config_entry_id == entry.entry_id:
+            registry.async_remove(entity_id)
 
 
 async def _async_setup_local_only_entry(
@@ -348,21 +377,59 @@ async def _async_setup_local_only_entry(
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     soundbar_device = domain_config.devices[device_id].device
+    _async_schedule_local_polling(hass, entry, soundbar_device)
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    return True
+
+
+def _async_schedule_local_polling(
+    hass: HomeAssistant, entry: ConfigEntry, device: SoundbarDevice
+) -> None:
+    """Keep a single fast local readback loop for one config entry."""
     refresh_lock = asyncio.Lock()
 
     async def async_refresh_local_state(_now: datetime.datetime) -> None:
         if refresh_lock.locked():
             return
         async with refresh_lock:
-            await soundbar_device.update_local_input_source(min_age=None)
+            await device.update_local_input_source(min_age=None)
 
     entry.async_on_unload(
         async_track_time_interval(
             hass, async_refresh_local_state, LOCAL_ONLY_POLL_INTERVAL
         )
     )
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
-    return True
+
+
+def _async_schedule_hybrid_cloud_polling(
+    hass: HomeAssistant, entry: ConfigEntry, device: SoundbarDevice
+) -> None:
+    """Refresh optional SmartThings state without repeating local RPC reads."""
+    refresh_lock = asyncio.Lock()
+    reauth_started = False
+
+    async def async_refresh_cloud_state(_now: datetime.datetime) -> None:
+        nonlocal reauth_started
+        if refresh_lock.locked() or reauth_started:
+            return
+        async with refresh_lock:
+            try:
+                await device.update_cloud_status()
+            except ConfigEntryAuthFailed:
+                if not reauth_started:
+                    reauth_started = True
+                    entry.async_start_reauth(hass)
+            except (ConfigEntryNotReady, SmartThingsConnectionError) as err:
+                device.handle_smartthings_availability(False)
+                _LOGGER.debug("[%s] Hybrid cloud refresh unavailable: %s", DOMAIN, err)
+            except HomeAssistantError as err:
+                _LOGGER.warning("[%s] Hybrid cloud refresh failed: %s", DOMAIN, err)
+
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass, async_refresh_cloud_state, HYBRID_CLOUD_POLL_INTERVAL
+        )
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):

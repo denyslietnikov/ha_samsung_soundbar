@@ -234,6 +234,13 @@ class SoundbarDevice:
             await self.update_local_status(min_age=None)
             return
 
+        await self.update_cloud_status()
+        if self.hybrid_mode:
+            await self.update_local_status(min_age=None)
+
+    async def update_cloud_status(self) -> None:
+        """Refresh cloud-only state without initiating another local RPC poll."""
+
         if self.__auth_provider is not None:
             await self.__auth_provider.async_get_access_token()
 
@@ -241,8 +248,8 @@ class SoundbarDevice:
             self.device.status.refresh,
             "refresh device status",
         )
+        self.__cloud_available = True
         self.__sync_optimistic_mute()
-        await self.__update_local_status()
 
         await self._update_media()
 
@@ -254,6 +261,8 @@ class SoundbarDevice:
             await self._update_woofer()
         if self.__enable_eq:
             await self._update_equalizer()
+        if self.hybrid_mode:
+            self.__notify_update_listeners()
 
     async def __call_smartthings(
         self,
@@ -377,7 +386,15 @@ class SoundbarDevice:
         previous_status = self.__local_status.copy()
         was_available = self.__local_available
         try:
-            local_status = dict(await self.__local_rpc.status())
+            readback = dict(await self.__local_rpc.status())
+            local_status = {
+                **previous_status,
+                **{
+                    key: value
+                    for key, value in readback.items()
+                    if self.__normalize_local_value(value) is not None
+                },
+            }
             sound_mode_readback_missing = False
             local_is_powered_off = (
                 self.__normalize_local_value(local_status.get("power")) == "powerOff"
@@ -430,14 +447,16 @@ class SoundbarDevice:
                 self.__expire_optimistic_sound_mode()
             else:
                 self.__sync_optimistic_sound_mode()
-            if self.local_only and (
+            if self.hybrid_mode and (
                 not was_available or previous_status != self.__local_status
             ):
                 self.__notify_update_listeners()
         except LocalRpcError as err:
-            self.__local_available = False
+            self.__local_available = self.__has_cached_local_status(
+                _LOCAL_STATUS_CACHE_TIMEOUT
+            )
             self.__local_last_error = str(err)
-            if self.local_only and was_available:
+            if self.hybrid_mode and was_available != self.__local_available:
                 self.__notify_update_listeners()
             log.debug(
                 "[%s] Local RPC status update failed for %s: %s",
@@ -497,7 +516,7 @@ class SoundbarDevice:
                     _LOCAL_STATUS_CACHE_TIMEOUT
                 )
                 self.__local_last_error = str(err)
-                if self.local_only and was_available != self.__local_available:
+                if self.hybrid_mode and was_available != self.__local_available:
                     self.__notify_update_listeners()
                 log.debug(
                     "[%s] Local RPC media state update failed for %s: %s",
@@ -519,7 +538,6 @@ class SoundbarDevice:
             if local_mute is not None:
                 self.__local_status["mute"] = local_mute
 
-            previous_sound_mode = self.__local_status.get("sound_mode")
             local_sound_mode = self.__normalize_local_value(local_sound_mode)
             if local_power == "powerOff":
                 self.__pending_local_sound_mode = None
@@ -546,15 +564,7 @@ class SoundbarDevice:
             self.__local_status_updated_at = datetime.datetime.now()
             self.__local_available = True
             self.__local_last_error = None
-            if (
-                previous_sound_mode != self.__local_status.get("sound_mode")
-                or (
-                    self.local_only
-                    and (
-                        not was_available or previous_status != self.__local_status
-                    )
-                )
-            ):
+            if not was_available or previous_status != self.__local_status:
                 self.__notify_update_listeners()
 
     async def __try_local_rpc(
@@ -1427,6 +1437,14 @@ class SoundbarDevice:
 
     @property
     def sound_from_detail_name(self) -> str | None:
+        if self.hybrid_mode and self.__has_fresh_local_status(
+            _LOCAL_STREAMING_SOURCE_CACHE_TIMEOUT
+        ):
+            if self.__local_value("power") == "powerOff":
+                return None
+            if self.__local_value("input_source") is not None:
+                return self.__local_streaming_sound_from_detail_name() or "External Device"
+
         detail_name = self.__clean_media_value(self.device.status.sound_from_detail_name)
         streaming_detail_name = self.__streaming_sound_from_detail_name()
         if streaming_detail_name is not None and self.__is_generic_sound_from_detail(
@@ -1697,6 +1715,14 @@ class SoundbarDevice:
 
     @property
     def media_app_name(self):
+        if self.hybrid_mode and self.__has_fresh_local_status(
+            _LOCAL_STREAMING_SOURCE_CACHE_TIMEOUT
+        ):
+            if self.__local_value("power") == "powerOff":
+                return None
+            if self.__local_value("input_source") is not None:
+                return self.__local_streaming_sound_from_detail_name() or "External Device"
+
         streaming_detail_name = self.__streaming_sound_from_detail_name()
         if streaming_detail_name is not None:
             return streaming_detail_name
