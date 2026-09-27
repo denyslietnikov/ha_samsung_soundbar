@@ -99,7 +99,7 @@ class SoundFromSensor(SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         """Register a fast local readback loop for hybrid streaming labels."""
-        if not self.__device.hybrid_mode:
+        if not self.__device.hybrid_mode or self.__device.local_only:
             return
 
         self.async_on_remove(

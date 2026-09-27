@@ -20,6 +20,8 @@ def register_device_update_listener(
     tracked_entities = tuple(entities)
     for entity in tracked_entities:
         entity._attr_available = device.available
+        if device.local_only:
+            entity._attr_should_poll = False
 
     @callback
     def async_write_states() -> None:

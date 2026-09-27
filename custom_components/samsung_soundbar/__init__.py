@@ -1,3 +1,5 @@
+import asyncio
+import datetime
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -15,6 +17,7 @@ from homeassistant.exceptions import (
 )
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_track_time_interval
 from pysmartthings.exceptions import (
     SmartThingsAuthenticationFailedError,
     SmartThingsConnectionError,
@@ -82,6 +85,7 @@ from .subscription import async_remove_subscription, async_setup_subscription
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["media_player", "switch", "image", "number", "select", "sensor"]
+LOCAL_ONLY_POLL_INTERVAL = datetime.timedelta(seconds=2)
 
 DUMP_EXECUTE_PAYLOAD_SCHEMA = vol.Schema(
     {
@@ -342,6 +346,21 @@ async def _async_setup_local_only_entry(
 
     async_unmerge_official_smartthings_device(hass, entry, device_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    soundbar_device = domain_config.devices[device_id].device
+    refresh_lock = asyncio.Lock()
+
+    async def async_refresh_local_state(_now: datetime.datetime) -> None:
+        if refresh_lock.locked():
+            return
+        async with refresh_lock:
+            await soundbar_device.update_local_input_source(min_age=None)
+
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass, async_refresh_local_state, LOCAL_ONLY_POLL_INTERVAL
+        )
+    )
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
 

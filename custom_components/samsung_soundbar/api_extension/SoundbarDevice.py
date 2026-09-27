@@ -377,7 +377,7 @@ class SoundbarDevice:
         previous_status = self.__local_status.copy()
         was_available = self.__local_available
         try:
-            local_status = await self.__local_rpc.status()
+            local_status = dict(await self.__local_rpc.status())
             sound_mode_readback_missing = False
             local_is_powered_off = (
                 self.__normalize_local_value(local_status.get("power")) == "powerOff"
@@ -569,7 +569,7 @@ class SoundbarDevice:
             await action(self.__local_rpc)
             self.__local_available = True
             self.__local_last_error = None
-            await self.__update_local_status()
+            await self.update_local_status(min_age=None)
             return True
         except (LocalRpcError, ValueError) as err:
             self.__local_available = False

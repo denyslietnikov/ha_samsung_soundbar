@@ -1,5 +1,6 @@
 """Regression tests for starting an existing entry without SmartThings Cloud."""
 
+import asyncio
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -93,6 +94,9 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
             integration, "async_unmerge_official_smartthings_device"
         )
         self.services = patch.object(integration, "_async_register_services")
+        self.timer = patch.object(
+            integration, "async_track_time_interval", return_value=MagicMock()
+        )
         for patcher in (
             self.cloud_auth,
             self.cloud_subscription,
@@ -100,9 +104,11 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
             self.client_session,
             self.device_registry,
             self.services,
+            self.timer,
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.timer_mock = integration.async_track_time_interval
 
     async def test_setup_and_reload_do_not_require_oauth_or_cloud(self) -> None:
         self.assertTrue(await async_setup_entry(self.hass, self.entry))
@@ -117,6 +123,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         self.assertEqual(self.rpc.status.await_count, 2)
         self.assertEqual(self.session.get.await_count, 0)
         self.assertEqual(self.session.post.await_count, 0)
+        self.assertEqual(self.timer_mock.call_count, 2)
 
     async def test_local_failure_recovers_without_cloud_fallback(self) -> None:
         self.rpc.status.side_effect = [LocalRpcError("offline"), LOCAL_STATUS]
@@ -170,8 +177,87 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
                 entities = add_entities.call_args.args[0]
                 expected_count = {"media_player": 1, "select": 2, "sensor": 2}
                 self.assertEqual(len(entities), expected_count.get(name, 0), name)
+                self.assertTrue(all(not entity.should_poll for entity in entities))
                 if name == "sensor":
                     self.assertEqual(entities[1].native_value, "External Device")
+
+    async def test_one_local_poll_refreshes_shared_state(self) -> None:
+        await async_setup_entry(self.hass, self.entry)
+        self.assertEqual(self.timer_mock.call_count, 1)
+        self.assertEqual(
+            self.timer_mock.call_args.args[2], integration.LOCAL_ONLY_POLL_INTERVAL
+        )
+        self.rpc.power_state = AsyncMock(return_value="powerOn")
+        self.rpc.input_source = AsyncMock(return_value="WIFI_AIRPLAY")
+        self.rpc.volume = AsyncMock(return_value=9)
+        self.rpc.is_muted = AsyncMock(return_value=False)
+        self.rpc.sound_mode = AsyncMock(return_value="GAME")
+        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        listener = MagicMock()
+        device.add_update_listener(listener)
+
+        await self.timer_mock.call_args.args[1](None)
+
+        self.assertEqual(device.volume_level, 0.09)
+        self.assertEqual(device.sound_from_detail_name, "AirPlay")
+        player = media_player_platform.SmartThingsSoundbarMediaPlayer(
+            device, self.session
+        )
+        input_select = select_platform.InputSelectEntity(
+            device, "input_preset", "mdi:video-input-hdmi"
+        )
+        mode_select = select_platform.SoundModeSelectEntity(
+            device, "sound_mode_preset", "mdi:surround-sound"
+        )
+        sound_from = sensor_platform.SoundFromSensor(
+            device, "sound_from", "mdi:speaker"
+        )
+        self.assertEqual(player.source, input_select.current_option)
+        self.assertEqual(input_select.current_option, "WIFI")
+        self.assertEqual(player.sound_mode, mode_select.current_option)
+        self.assertEqual(mode_select.current_option, "Game Pro")
+        self.assertEqual(sound_from.native_value, "AirPlay")
+        listener.assert_called_once()
+        self.assertEqual(self.rpc.status.await_count, 1)
+        self.assertEqual(self.session.get.await_count, 0)
+        self.entry.async_on_unload.assert_any_call(self.timer_mock.return_value)
+
+    async def test_overlapping_local_ticks_do_not_duplicate_poll(self) -> None:
+        await async_setup_entry(self.hass, self.entry)
+        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_refresh(*, min_age):
+            started.set()
+            await release.wait()
+
+        device.update_local_input_source = AsyncMock(side_effect=slow_refresh)
+        tick = self.timer_mock.call_args.args[1]
+        first = asyncio.create_task(tick(None))
+        await started.wait()
+        await tick(None)
+        release.set()
+        await first
+        device.update_local_input_source.assert_awaited_once_with(min_age=None)
+
+    async def test_local_entities_do_not_start_private_timers(self) -> None:
+        await async_setup_entry(self.hass, self.entry)
+        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        player = media_player_platform.SmartThingsSoundbarMediaPlayer(
+            device, self.session
+        )
+        sound_from = sensor_platform.SoundFromSensor(
+            device, "sound_from", "mdi:speaker"
+        )
+        with (
+            patch.object(media_player_platform, "async_track_time_interval") as media_timer,
+            patch.object(sensor_platform, "async_track_time_interval") as sensor_timer,
+        ):
+            await player.async_added_to_hass()
+            await sound_from.async_added_to_hass()
+        media_timer.assert_not_called()
+        sensor_timer.assert_not_called()
 
     async def test_local_command_failure_cannot_use_cloud(self) -> None:
         await async_setup_entry(self.hass, self.entry)
