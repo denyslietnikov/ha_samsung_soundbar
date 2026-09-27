@@ -6,11 +6,21 @@
         "step":{
             "user":{
                 "data": {
-                    "device_id": "Device ID",
-                    "device_name":"Device Name"
+                    "control_mode": "Steuerungsmodus"
                   },
-                  "description": "Verbinde dein Samsung Konto mit SmartThings OAuth. Füge zuerst SmartThings Application Credentials hinzu, falls Home Assistant danach fragt.",
-                  "title": "SmartThings verbinden"
+                  "description": "Wähle 'Nur lokal' ohne Samsung-Konto oder einen SmartThings-Modus mit OAuth.",
+                  "title": "Steuerungsmodus wählen"
+            },
+            "local": {
+                "data": {
+                    "local_host": "Lokaler Soundbar Host/IP",
+                    "local_port": "Lokaler RPC Port",
+                    "local_verify_ssl": "Lokales SSL Zertifikat prüfen",
+                    "local_timeout": "Lokales RPC Timeout",
+                    "device_name": "Gerätename"
+                },
+                "description": "Aktiviere IP Control auf der Soundbar. Home Assistant prüft die lokale RPC-Verbindung und eine stabile Gerätekennung.",
+                "title": "Lokale Soundbar verbinden"
             },
             "device":{
                 "data" : {
@@ -36,6 +46,10 @@
                 "title": "Geräte Einstellungen"
             }
         },
+        "error": {
+            "local_cannot_connect": "Verbindung zur lokalen RPC API fehlgeschlagen. Prüfe IP Control, Host, Port und Netzwerk.",
+            "identity_unavailable": "Keine stabile lokale Gerätekennung auf Port 8001 oder 9110 gefunden."
+        },
         "abort":{
             "cannot_connect": "Verbindung zu SmartThings fehlgeschlagen. Bitte später erneut versuchen.",
             "invalid_auth": "SmartThings Authentifizierung fehlgeschlagen.",
@@ -44,6 +58,7 @@
             "missing_scopes": "SmartThings hat nicht alle benötigten Berechtigungen erteilt.",
             "no_devices": "Für dieses Konto wurden keine SmartThings Geräte zurückgegeben.",
             "oauth_error": "Der SmartThings OAuth Flow hat keine gültigen Daten zurückgegeben.",
+            "invalid_control_mode": "Nicht unterstützter Steuerungsmodus.",
             "reauth_account_mismatch": "Das ausgewählte SmartThings Konto passt nicht zu diesem Soundbar Eintrag.",
             "reauth_device_unavailable": "Dieses SmartThings Konto kann nicht auf die konfigurierte Soundbar zugreifen.",
             "reauth_successful": "SmartThings wurde erneut authentifiziert."

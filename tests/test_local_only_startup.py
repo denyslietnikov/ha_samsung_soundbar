@@ -116,6 +116,26 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
             self.addCleanup(patcher.stop)
         self.timer_mock = integration.async_track_time_interval
 
+    async def test_new_tokenless_entry_starts_and_reloads_without_cloud(self) -> None:
+        self.entry.data = {
+            CONF_ENTRY_DEVICE_ID: "local:wifi_mac:94:e6:ba:89:bd:ba",
+            CONF_ENTRY_DEVICE_NAME: "Soundbar Q800F",
+            CONF_CONTROL_MODE: CONTROL_MODE_LOCAL_ONLY,
+            CONF_LOCAL_HOST: "192.0.2.26",
+            "local_identity": {"wifi_mac": "94:e6:ba:89:bd:ba"},
+        }
+        self.entry.options = {}
+        self.assertTrue(await async_setup_entry(self.hass, self.entry))
+        device = self.hass.data[DOMAIN].devices[
+            "local:wifi_mac:94:e6:ba:89:bd:ba"
+        ].device
+        self.assertEqual(device.sound_mode, "Game Pro")
+        self.assertTrue(await async_unload_entry(self.hass, self.entry))
+        self.assertTrue(await async_setup_entry(self.hass, self.entry))
+        self.assertEqual(self.rpc.status.await_count, 2)
+        self.assertEqual(self.session.get.await_count, 0)
+        self.assertEqual(self.session.post.await_count, 0)
+
     async def test_setup_and_reload_do_not_require_oauth_or_cloud(self) -> None:
         self.assertTrue(await async_setup_entry(self.hass, self.entry))
         device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device

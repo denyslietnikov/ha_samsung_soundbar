@@ -82,6 +82,23 @@ class TestLocalOnlyMigration(IsolatedAsyncioTestCase):
         self.assertEqual(result["errors"], {"base": "identity_mismatch"})
         self.hass.config_entries.async_update_entry.assert_not_called()
 
+    async def test_initial_local_entry_identity_protects_host_change(self) -> None:
+        self.entry.data = {
+            CONF_ENTRY_DEVICE_ID: "local:wifi_mac:94:e6:ba:89:bd:ba",
+            CONF_ENTRY_DEVICE_NAME: "Soundbar Q800F",
+            CONF_LOCAL_IDENTITY: IDENTITY,
+            CONF_LOCAL_HOST: "192.0.2.26",
+            CONF_CONTROL_MODE: CONTROL_MODE_LOCAL_ONLY,
+        }
+        self.entry.options = {}
+        self.read_identity.return_value = {"wifi_mac": "94:e6:ba:89:bd:bb"}
+        result = await self.flow.async_step_init({CONF_LOCAL_HOST: "192.0.2.27"})
+        self.assertEqual(result["errors"], {"base": "identity_mismatch"})
+
+        self.read_identity.return_value = {"wifi_mac": IDENTITY["wifi_mac"]}
+        result = await self.flow.async_step_init({CONF_LOCAL_HOST: "192.0.2.27"})
+        self.assertEqual(result["data"][CONF_LOCAL_IDENTITY]["wifi_mac"], IDENTITY["wifi_mac"])
+
     async def test_ip_change_requires_matching_saved_identity(self) -> None:
         self.entry.options = {
             CONF_CONTROL_MODE: CONTROL_MODE_LOCAL_ONLY,

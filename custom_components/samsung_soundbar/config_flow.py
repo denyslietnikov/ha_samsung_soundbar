@@ -47,11 +47,12 @@ from .const import (
     CONTROL_MODE_LABELS,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
     CONTROL_MODE_LOCAL_ONLY,
+    CONTROL_MODE_SMARTTHINGS_CLOUD,
     DOMAIN,
     SMARTTHINGS_OAUTH_SCOPES,
     SMARTTHINGS_REQUIRED_SCOPES,
 )
-from .entry_options import get_entry_options
+from .entry_options import DEFAULT_ENTRY_OPTIONS, get_entry_option, get_entry_options
 from .local_rpc import LocalRpcError, LocalSoundbarRpcClient
 from .local_identity import LocalIdentityError, async_read_local_identity, identities_match
 from .subscription import async_remove_subscription
@@ -71,6 +72,9 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         self._devices: dict[str, str] = {}
         self._device_locations: dict[str, str] = {}
         self._oauth_data: dict[str, Any] | None = None
+        self._selected_control_mode = CONTROL_MODE_SMARTTHINGS_CLOUD
+        self._pending_device_id: str | None = None
+        self._pending_device_name: str | None = None
 
     @staticmethod
     @callback
@@ -136,7 +140,133 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle user flow start."""
-        return await super().async_step_user(user_input)
+        if self.source == SOURCE_REAUTH:
+            return await super().async_step_user(user_input)
+        if user_input is None:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=vol.Schema(
+                    {vol.Required(CONF_CONTROL_MODE): vol.In(CONTROL_MODE_LABELS)}
+                ),
+            )
+        mode = user_input.get(CONF_CONTROL_MODE)
+        if mode not in CONTROL_MODE_LABELS:
+            return self.async_abort(reason="invalid_control_mode")
+        self._selected_control_mode = mode
+        if mode == CONTROL_MODE_LOCAL_ONLY:
+            return await self.async_step_local()
+        return await super().async_step_user()
+
+    async def async_step_local(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Validate a local host and create a local-only or Hybrid entry."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            host = str(user_input.get(CONF_LOCAL_HOST, "")).strip()
+            if not host:
+                errors[CONF_LOCAL_HOST] = "required"
+            else:
+                local_options = {
+                    CONF_LOCAL_HOST: host,
+                    CONF_LOCAL_PORT: user_input[CONF_LOCAL_PORT],
+                    CONF_LOCAL_VERIFY_SSL: user_input[CONF_LOCAL_VERIFY_SSL],
+                    CONF_LOCAL_TIMEOUT: user_input[CONF_LOCAL_TIMEOUT],
+                }
+                try:
+                    identity = await async_read_local_identity(
+                        async_get_clientsession(self.hass),
+                        host,
+                        local_options[CONF_LOCAL_TIMEOUT],
+                    )
+                except LocalIdentityError:
+                    errors["base"] = "identity_unavailable"
+                else:
+                    rpc = LocalSoundbarRpcClient(
+                        host,
+                        async_get_clientsession(
+                            self.hass,
+                            verify_ssl=local_options[CONF_LOCAL_VERIFY_SSL],
+                        ),
+                        port=local_options[CONF_LOCAL_PORT],
+                        verify_ssl=local_options[CONF_LOCAL_VERIFY_SSL],
+                        timeout=local_options[CONF_LOCAL_TIMEOUT],
+                    )
+                    try:
+                        await rpc.create_token()
+                    except LocalRpcError:
+                        errors["base"] = "local_cannot_connect"
+                    else:
+                        if self._async_local_entry_exists(identity, host):
+                            return self.async_abort(reason="already_configured")
+                        if self._selected_control_mode == CONTROL_MODE_LOCAL_ONLY:
+                            identity_key = next(
+                                key
+                                for key in ("wifi_mac", "tizen_duid", "upnp_udn")
+                                if key in identity
+                            )
+                            device_id = f"local:{identity_key}:{identity[identity_key]}"
+                            await self.async_set_unique_id(device_id)
+                            self._abort_if_unique_id_configured()
+                            device_name = user_input[CONF_ENTRY_DEVICE_NAME].strip()
+                            return self.async_create_entry(
+                                title=device_name,
+                                data={
+                                    CONF_ENTRY_DEVICE_ID: device_id,
+                                    CONF_ENTRY_DEVICE_NAME: device_name,
+                                    CONF_CONTROL_MODE: CONTROL_MODE_LOCAL_ONLY,
+                                    CONF_LOCAL_IDENTITY: identity,
+                                    **local_options,
+                                },
+                            )
+                        if self._oauth_data is None or self._pending_device_id is None:
+                            return self.async_abort(reason="oauth_error")
+                        return self.async_create_entry(
+                            title=self._pending_device_name,
+                            data={
+                                **self._oauth_data,
+                                CONF_ENTRY_DEVICE_ID: self._pending_device_id,
+                                CONF_ENTRY_DEVICE_NAME: self._pending_device_name,
+                                CONF_LOCATION_ID: self._device_locations[
+                                    self._pending_device_id
+                                ],
+                                CONF_CONTROL_MODE: CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+                                CONF_LOCAL_IDENTITY: identity,
+                                **local_options,
+                            },
+                        )
+
+        schema = {
+            vol.Required(CONF_LOCAL_HOST): str,
+            vol.Required(
+                CONF_LOCAL_PORT, default=DEFAULT_ENTRY_OPTIONS[CONF_LOCAL_PORT]
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+            vol.Required(
+                CONF_LOCAL_VERIFY_SSL,
+                default=DEFAULT_ENTRY_OPTIONS[CONF_LOCAL_VERIFY_SSL],
+            ): bool,
+            vol.Required(
+                CONF_LOCAL_TIMEOUT, default=DEFAULT_ENTRY_OPTIONS[CONF_LOCAL_TIMEOUT]
+            ): vol.All(vol.Coerce(float), vol.Range(min=1, max=60)),
+        }
+        if self._selected_control_mode == CONTROL_MODE_LOCAL_ONLY:
+            schema[vol.Required(CONF_ENTRY_DEVICE_NAME, default="Samsung Soundbar")] = str
+        return self.async_show_form(
+            step_id="local", data_schema=vol.Schema(schema), errors=errors
+        )
+
+    def _async_local_entry_exists(self, identity: dict[str, str], host: str) -> bool:
+        """Avoid another entry for a known local soundbar."""
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            saved = entry.options.get(CONF_LOCAL_IDENTITY) or entry.data.get(
+                CONF_LOCAL_IDENTITY
+            )
+            if isinstance(saved, dict) and identities_match(saved, identity):
+                return True
+            configured_host = str(get_entry_option(entry, CONF_LOCAL_HOST)).strip()
+            if configured_host and configured_host.casefold() == host.casefold():
+                return True
+        return False
 
     async def async_step_reauth(
         self,
@@ -166,6 +296,11 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             await self.async_set_unique_id(user_input[CONF_ENTRY_DEVICE_ID])
             self._abort_if_unique_id_configured()
 
+            if self._selected_control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS:
+                self._pending_device_id = user_input[CONF_ENTRY_DEVICE_ID]
+                self._pending_device_name = user_input[CONF_ENTRY_DEVICE_NAME]
+                return await self.async_step_local()
+
             return self.async_create_entry(
                 title=user_input[CONF_ENTRY_DEVICE_NAME],
                 data={
@@ -175,6 +310,7 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
                     CONF_LOCATION_ID: self._device_locations[
                         user_input[CONF_ENTRY_DEVICE_ID]
                     ],
+                    CONF_CONTROL_MODE: CONTROL_MODE_SMARTTHINGS_CLOUD,
                 },
             )
 
@@ -217,7 +353,21 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         device_name = entry.data.get(CONF_ENTRY_DEVICE_NAME) or self._devices[
             device_id
         ]
+        preserved_local_data = {
+            key: entry.data[key]
+            for key in (
+                CONF_CONTROL_MODE,
+                CONF_LOCAL_HOST,
+                CONF_LOCAL_PORT,
+                CONF_LOCAL_VERIFY_SSL,
+                CONF_LOCAL_TIMEOUT,
+                CONF_LOCAL_IDENTITY,
+                CONF_LOCAL_FALLBACK_TO_CLOUD,
+            )
+            if key in entry.data
+        }
         new_data = {
+            **preserved_local_data,
             **data,
             CONF_ENTRY_DEVICE_ID: device_id,
             CONF_ENTRY_DEVICE_NAME: device_name,
@@ -275,7 +425,9 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                 except LocalIdentityError:
                     errors["base"] = "identity_unavailable"
                 else:
-                    saved = self.config_entry.options.get(CONF_LOCAL_IDENTITY)
+                    saved = self.config_entry.options.get(
+                        CONF_LOCAL_IDENTITY
+                    ) or self.config_entry.data.get(CONF_LOCAL_IDENTITY)
                     if saved and not identities_match(saved, identity):
                         errors["base"] = "identity_mismatch"
                     elif not saved:

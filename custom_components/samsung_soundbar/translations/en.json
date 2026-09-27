@@ -6,11 +6,21 @@
         "step": {
             "user": {
                 "data": {
-                    "device_id": "Device ID",
-                    "device_name": "Device Name"
+                    "control_mode": "Control mode"
                 },
-                "description": "Connect your Samsung account with SmartThings OAuth. Add SmartThings application credentials first if Home Assistant asks for them.",
-                "title": "Connect SmartThings"
+                "description": "Choose Local only for setup without a Samsung account, or a SmartThings mode for OAuth setup.",
+                "title": "Choose control mode"
+            },
+            "local": {
+                "data": {
+                    "local_host": "Local soundbar host/IP",
+                    "local_port": "Local RPC port",
+                    "local_verify_ssl": "Verify local SSL certificate",
+                    "local_timeout": "Local RPC timeout",
+                    "device_name": "Device name"
+                },
+                "description": "Enable IP Control on the soundbar. Home Assistant checks the local RPC connection and stable device identity before adding it.",
+                "title": "Connect local soundbar"
             },
             "device": {
                 "data": {
@@ -36,6 +46,10 @@
                 "title": "Device Settings"
             }
         },
+        "error": {
+            "local_cannot_connect": "Could not connect to the soundbar's local RPC API. Check IP Control, host, port, and network.",
+            "identity_unavailable": "No stable local identity was found on ports 8001 or 9110."
+        },
         "abort": {
             "cannot_connect": "Could not connect to SmartThings. Try again later.",
             "invalid_auth": "SmartThings authorization failed.",
@@ -44,6 +58,7 @@
             "missing_scopes": "SmartThings did not grant all required scopes.",
             "no_devices": "No SmartThings devices were returned for this account.",
             "oauth_error": "SmartThings OAuth flow did not return valid data.",
+            "invalid_control_mode": "Unsupported control mode.",
             "reauth_account_mismatch": "The selected SmartThings account does not match this soundbar entry.",
             "reauth_device_unavailable": "This SmartThings account cannot access the configured soundbar.",
             "reauth_successful": "SmartThings has been reauthenticated."
