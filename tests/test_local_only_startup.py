@@ -187,6 +187,67 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         self.assertEqual(self.session.get.await_count, 0)
         self.assertEqual(self.session.post.await_count, 0)
 
+    async def test_lan_loss_marks_fresh_local_only_state_unavailable_and_recovers(self) -> None:
+        await async_setup_entry(self.hass, self.entry)
+        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        listener = MagicMock()
+        device.add_update_listener(listener)
+        self.rpc.status.side_effect = LocalRpcError("offline")
+
+        await device.update_local_status(min_age=None)
+        self.assertFalse(device.available)
+        listener.assert_called_once()
+        await device.update_local_status(min_age=None)
+        listener.assert_called_once()
+        self.rpc.status.side_effect = None
+        await device.update_local_status(min_age=None)
+        self.assertTrue(device.available)
+        self.assertEqual(device.volume_level, 0.08)
+        self.assertEqual(listener.call_count, 2)
+        self.assertEqual(self.session.get.await_count, 0)
+        self.assertEqual(self.session.post.await_count, 0)
+
+    async def test_fast_poll_outage_recovers_without_oauth(self) -> None:
+        await async_setup_entry(self.hass, self.entry)
+        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        self.rpc.power_state = AsyncMock(side_effect=LocalRpcError("offline"))
+        self.rpc.input_source = AsyncMock(return_value="E_ARC")
+        self.rpc.volume = AsyncMock(return_value=8)
+        self.rpc.is_muted = AsyncMock(return_value=False)
+        self.rpc.sound_mode = AsyncMock(return_value="GAME")
+        await device.update_local_input_source(min_age=None)
+        self.assertFalse(device.available)
+        self.rpc.power_state.side_effect = None
+        self.rpc.power_state.return_value = "powerOn"
+        await device.update_local_input_source(min_age=None)
+        self.assertTrue(device.available)
+        self.assertEqual(device.input_source, "TV ARC/eARC")
+        self.assertEqual(self.session.post.await_count, 0)
+
+    async def test_streaming_fixtures_keep_wifi_and_clear_stale_sound_from(self) -> None:
+        await async_setup_entry(self.hass, self.entry)
+        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        for source, name in (
+            ("WIFI_AIRPLAY", "AirPlay"), ("WIFI_GOOGLE", "Google Cast"),
+            ("WIFI_ROON", "Roon"), ("CD", "Roon"),
+            ("WIFI_SPOTIFY", "Spotify"), ("WIFI_IDLE", "External Device"),
+        ):
+            with self.subTest(source=source):
+                self.rpc.status.return_value = {**LOCAL_STATUS, "input_source": source}
+                await device.update_local_status(min_age=None)
+                self.assertEqual(device.input_source, "WIFI")
+                self.assertEqual(device.sound_from_detail_name, name)
+        self.rpc.status.return_value = {**LOCAL_STATUS, "mute": True}
+        await device.update_local_status(min_age=None)
+        self.assertTrue(device.volume_muted)
+        self.assertEqual(device.input_source, "TV ARC/eARC")
+        self.assertEqual(device.sound_from_detail_name, "External Device")
+        self.rpc.status.return_value = {**LOCAL_STATUS, "power": "powerOff"}
+        await device.update_local_status(min_age=None)
+        self.assertEqual(device.state, "off")
+        self.assertEqual(self.session.get.await_count, 0)
+        self.assertEqual(self.session.post.await_count, 0)
+
     async def test_expired_stored_oauth_token_is_ignored(self) -> None:
         self.entry.data["token"] = {"access_token": "expired"}
         self.assertTrue(await async_setup_entry(self.hass, self.entry))

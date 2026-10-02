@@ -29,6 +29,7 @@ from ..const import (
 )
 from ..local_rpc import (
     LOCAL_SOUND_MODE_VALUES,
+    LocalRpcCommandError,
     LocalRpcError,
     LocalSoundbarRpcClient,
 )
@@ -452,8 +453,9 @@ class SoundbarDevice:
             ):
                 self.__notify_update_listeners()
         except LocalRpcError as err:
-            self.__local_available = self.__has_cached_local_status(
-                _LOCAL_STATUS_CACHE_TIMEOUT
+            self.__local_available = (
+                not self.local_only
+                and self.__has_cached_local_status(_LOCAL_STATUS_CACHE_TIMEOUT)
             )
             self.__local_last_error = str(err)
             if self.hybrid_mode and was_available != self.__local_available:
@@ -495,25 +497,31 @@ class SoundbarDevice:
             previous_status = self.__local_status.copy()
             was_available = self.__local_available
             try:
+                values = await asyncio.gather(
+                    self.__local_rpc.power_state(),
+                    self.__local_rpc.input_source(),
+                    self.__local_rpc.volume(),
+                    self.__local_rpc.is_muted(),
+                    self.__local_rpc.sound_mode(),
+                    return_exceptions=True,
+                )
+                for value in values:
+                    if isinstance(value, BaseException):
+                        raise value
                 (
                     local_power,
                     local_input_source,
                     local_volume,
                     local_mute,
                     local_sound_mode,
-                ) = await asyncio.gather(
-                    self.__local_rpc.power_state(),
-                    self.__local_rpc.input_source(),
-                    self.__local_rpc.volume(),
-                    self.__local_rpc.is_muted(),
-                    self.__local_rpc.sound_mode(),
-                )
+                ) = values
             except LocalRpcError as err:
-                # Do not discard a usable local cache because one fast polling
+                # In Hybrid, do not discard a usable cache because one fast polling
                 # cycle failed. Falling back to the slower cloud value for a
                 # single cycle makes the Home Assistant volume slider jump.
-                self.__local_available = self.__has_cached_local_status(
-                    _LOCAL_STATUS_CACHE_TIMEOUT
+                self.__local_available = (
+                    not self.local_only
+                    and self.__has_cached_local_status(_LOCAL_STATUS_CACHE_TIMEOUT)
                 )
                 self.__local_last_error = str(err)
                 if self.hybrid_mode and was_available != self.__local_available:
@@ -581,7 +589,14 @@ class SoundbarDevice:
             self.__local_last_error = None
             await self.update_local_status(min_age=None)
             return True
-        except (LocalRpcError, ValueError) as err:
+        except (LocalRpcCommandError, ValueError) as err:
+            # A rejected or partially completed command is not a LAN failure.
+            # Publish actual readback, but never repeat this write via Cloud.
+            await self.update_local_status(min_age=None)
+            raise HomeAssistantError(
+                f"Local soundbar RPC rejected {description}: {err}"
+            ) from err
+        except LocalRpcError as err:
             self.__local_available = False
             self.__local_last_error = str(err)
             log.warning(

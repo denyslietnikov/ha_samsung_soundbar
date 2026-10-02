@@ -5,7 +5,7 @@ import datetime
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 
 import custom_components.samsung_soundbar as integration
 from custom_components.samsung_soundbar.api_extension.SoundbarDevice import SoundbarDevice
@@ -15,7 +15,7 @@ from custom_components.samsung_soundbar.const import (
 )
 from custom_components.samsung_soundbar.entity_updates import register_device_update_listener
 from custom_components.samsung_soundbar.local_device import LocalDevice
-from custom_components.samsung_soundbar.local_rpc import LocalRpcError
+from custom_components.samsung_soundbar.local_rpc import LocalRpcCommandError, LocalRpcError
 from custom_components.samsung_soundbar.switch import SoundbarSwitchAdvancedAudio
 
 
@@ -130,6 +130,45 @@ class TestHybridState(IsolatedAsyncioTestCase):
         self.assertEqual(self.device.volume_level, 0.08)
         self.assertEqual(self.device.input_source, "WIFI")
         self.assertEqual(self.device.sound_from_detail_name, "Google Cast")
+
+    async def test_reachable_command_failure_does_not_repeat_write_via_cloud(self) -> None:
+        await self.device.update_local_input_source(min_age=None)
+        self.rpc.set_volume = AsyncMock(side_effect=LocalRpcCommandError("no progress"))
+        self.rpc.status = AsyncMock(return_value={"power": "powerOn", "volume": 9})
+        self.device.device.set_volume = AsyncMock()
+
+        with self.assertRaisesRegex(HomeAssistantError, "no progress"):
+            await self.device.set_volume(0.10)
+
+        self.device.device.set_volume.assert_not_awaited()
+        self.assertTrue(self.device.local_available)
+        self.assertEqual(self.device.volume_level, 0.09)
+
+    async def test_transport_failure_still_allows_hybrid_cloud_fallback(self) -> None:
+        self.rpc.set_volume = AsyncMock(side_effect=LocalRpcError("offline"))
+        self.device.device.set_volume = AsyncMock()
+
+        await self.device.set_volume(0.10)
+
+        self.device.device.set_volume.assert_awaited_once_with(10, True)
+        self.assertFalse(self.device.local_available)
+
+    async def test_failed_poll_drains_other_reads_before_next_cycle(self) -> None:
+        started, release = asyncio.Event(), asyncio.Event()
+        self.rpc.power_state.side_effect = LocalRpcError("offline")
+
+        async def delayed_mode():
+            started.set()
+            await release.wait()
+            return "GAME"
+
+        self.rpc.sound_mode.side_effect = delayed_mode
+        poll = asyncio.create_task(self.device.update_local_input_source(min_age=None))
+        await started.wait()
+        self.assertFalse(poll.done())
+        release.set()
+        await poll
+        self.assertFalse(self.device.local_available)
 
     async def test_entities_share_push_and_advanced_audio_stays_optimistic(self) -> None:
         entry = MagicMock()

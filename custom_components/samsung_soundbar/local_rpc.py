@@ -6,9 +6,11 @@ from typing import Any
 
 from aiohttp import ClientError, ClientResponseError, ClientSession
 
-
 DEFAULT_LOCAL_RPC_PORT = 1516
 DEFAULT_LOCAL_RPC_TIMEOUT = 8
+MAX_VOLUME_COMMANDS = 200
+MAX_VOLUME_UNCHANGED_READBACKS = 3
+VOLUME_ADJUSTMENT_TIMEOUT = 60
 DEFAULT_LOCAL_RPC_METHODS = (
     "powerControl",
     "getVolume",
@@ -34,8 +36,16 @@ class LocalRpcAuthError(LocalRpcError):
     """Raised when the local soundbar rejects the access token."""
 
 
+class LocalRpcCommandError(LocalRpcError):
+    """Raised when a reachable soundbar rejects or cannot complete a command."""
+
+
+class LocalRpcMethodNotFoundError(LocalRpcCommandError):
+    """Raised for the JSON-RPC method-not-found response (-32601)."""
+
+
 class LocalSoundbarRpcClient:
-    """Small diagnostic client for Samsung soundbar local JSON-RPC."""
+    """Samsung soundbar local JSON-RPC with serialized requests and readback."""
 
     def __init__(
         self,
@@ -44,7 +54,7 @@ class LocalSoundbarRpcClient:
         *,
         port: int = DEFAULT_LOCAL_RPC_PORT,
         verify_ssl: bool = False,
-        timeout: int | float = DEFAULT_LOCAL_RPC_TIMEOUT,
+        timeout: float = DEFAULT_LOCAL_RPC_TIMEOUT,
     ) -> None:
         self._url = f"https://{host}:{port}/"
         self._session = session
@@ -53,6 +63,7 @@ class LocalSoundbarRpcClient:
         self._token: str | None = None
         self._token_lock = asyncio.Lock()
         self._call_lock = asyncio.Lock()
+        self._volume_lock = asyncio.Lock()
         self._request_id = 0
 
     @property
@@ -63,7 +74,7 @@ class LocalSoundbarRpcClient:
         raw_payload = json.dumps(payload, separators=(",", ":"))
         try:
             async with asyncio.timeout(self._timeout):
-                response = await self._session.post(
+                async with self._session.post(
                     self._url,
                     data=raw_payload,
                     headers={
@@ -71,15 +82,22 @@ class LocalSoundbarRpcClient:
                         "Accept": "application/json",
                     },
                     ssl=self._verify_ssl,
-                )
-                response.raise_for_status()
-                data = await response.json(content_type=None)
+                ) as response:
+                    response.raise_for_status()
+                    data = await response.json(content_type=None)
         except ClientResponseError as err:
-            raise LocalRpcError(
-                f"HTTP {err.status}: {err.message or 'request failed'}"
+            error_type = (
+                LocalRpcAuthError if err.status in (401, 403) else LocalRpcError
+            )
+            raise error_type(
+                self._sanitize_error(
+                    f"HTTP {err.status}: {err.message or 'request failed'}", payload
+                )
             ) from err
         except (ClientError, asyncio.TimeoutError) as err:
-            raise LocalRpcError(str(err)) from err
+            raise LocalRpcError(
+                self._sanitize_error(str(err) or "request timed out", payload)
+            ) from err
         except json.JSONDecodeError as err:
             raise LocalRpcError("response is not valid JSON") from err
 
@@ -88,15 +106,25 @@ class LocalSoundbarRpcClient:
 
         if "error" in data:
             error = data["error"]
-            message = self._format_error(error)
+            message = self._sanitize_error(self._format_error(error), payload)
+            if isinstance(error, dict) and str(error.get("code")) == "-32601":
+                raise LocalRpcMethodNotFoundError(message)
             if "token" in message.lower() or "auth" in message.lower():
                 raise LocalRpcAuthError(message)
-            raise LocalRpcError(message)
+            raise LocalRpcCommandError(message)
 
         result = data.get("result")
         if isinstance(result, dict):
+            if result.get("success") is False:
+                raise LocalRpcCommandError("command returned success: false")
             return result
         return {"value": result}
+
+    def _sanitize_error(self, message: str, payload: dict[str, Any]) -> str:
+        for token in (self._token, payload.get("params", {}).get("AccessToken")):
+            if isinstance(token, str) and token:
+                message = message.replace(token, "***")
+        return message
 
     @staticmethod
     def _format_error(error: Any) -> str:
@@ -172,9 +200,14 @@ class LocalSoundbarRpcClient:
         except LocalRpcAuthError:
             if not authenticated:
                 raise
+            self._token = None
             await self.create_token()
             request_params["AccessToken"] = self._token
-            return await self._post(self._payload(method, request_params))
+            try:
+                return await self._post(self._payload(method, request_params))
+            except LocalRpcAuthError:
+                self._token = None
+                raise
 
     async def power_on(self) -> None:
         await self.call("powerControl", {"power": "powerOn"})
@@ -186,32 +219,55 @@ class LocalSoundbarRpcClient:
         await self.call("remoteKeyControl", {"remoteKey": remote_key})
 
     async def volume_up(self) -> None:
-        await self.remote_key("VOL_UP")
+        async with self._volume_lock:
+            await self.remote_key("VOL_UP")
 
     async def volume_down(self) -> None:
-        await self.remote_key("VOL_DOWN")
+        async with self._volume_lock:
+            await self.remote_key("VOL_DOWN")
 
     async def mute_toggle(self) -> None:
         await self.remote_key("MUTE")
 
     async def set_volume(self, level: int) -> None:
-        if not 0 <= level <= 100:
+        if (
+            isinstance(level, bool)
+            or not isinstance(level, int)
+            or not 0 <= level <= 100
+        ):
             raise ValueError("Volume has to be in range 0-100")
 
-        try:
-            await self.call("setVolume", {"volume": level})
-            return
-        except LocalRpcError:
-            pass
+        async with self._volume_lock:
+            try:
+                await self.call("setVolume", {"volume": level})
+                return
+            except LocalRpcMethodNotFoundError:
+                pass
 
-        current = await self.volume()
-        while current != level:
-            if current < level:
-                await self.volume_up()
-                current += 1
-            else:
-                await self.volume_down()
-                current -= 1
+            try:
+                async with asyncio.timeout(VOLUME_ADJUSTMENT_TIMEOUT):
+                    await self._adjust_volume(level)
+            except TimeoutError as err:
+                raise LocalRpcCommandError("volume adjustment timed out") from err
+
+    async def _adjust_volume(self, level: int) -> None:
+        # Hold the volume transaction lock, but acquire the RPC lock per request
+        # so other state reads can continue without observing an intermediate volume.
+        current = await self._read_volume()
+        unchanged = 0
+        for _ in range(MAX_VOLUME_COMMANDS):
+            if current == level:
+                return
+            await self.remote_key("VOL_UP" if current < level else "VOL_DOWN")
+            readback = await self._read_volume()
+            unchanged = unchanged + 1 if readback == current else 0
+            current = readback
+            if unchanged >= MAX_VOLUME_UNCHANGED_READBACKS:
+                raise LocalRpcCommandError(
+                    "volume did not change after repeated commands"
+                )
+        if current != level:
+            raise LocalRpcCommandError("volume adjustment exceeded the command limit")
 
     async def select_input(self, source: str) -> None:
         await self.call("inputSelectControl", {"inputSource": source})
@@ -224,14 +280,30 @@ class LocalSoundbarRpcClient:
         return str(value) if value is not None else None
 
     async def volume(self) -> int:
+        async with self._volume_lock:
+            return await self._read_volume()
+
+    async def _read_volume(self) -> int:
         value = (await self.call("getVolume")).get("volume")
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise LocalRpcError("getVolume did not return a valid volume")
         try:
-            return int(value)
+            volume = int(value)
         except (TypeError, ValueError) as err:
             raise LocalRpcError("getVolume did not return a valid volume") from err
+        if not 0 <= volume <= 100:
+            raise LocalRpcError("getVolume returned a volume outside 0-100")
+        return volume
 
     async def is_muted(self) -> bool:
-        return bool((await self.call("getMute")).get("mute"))
+        value = (await self.call("getMute")).get("mute")
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str) and value.lower() in ("true", "false", "0", "1"):
+            return value.lower() in ("true", "1")
+        raise LocalRpcError("getMute did not return a valid mute state")
 
     async def input_source(self) -> str | None:
         value = (await self.call("inputSelectControl")).get("inputSource")
@@ -250,26 +322,35 @@ class LocalSoundbarRpcClient:
         return str(value) if value is not None else None
 
     async def status(self) -> dict[str, Any]:
-        power, volume, mute, source, sound_mode, codec, identifier = (
-            await asyncio.gather(
-                self.power_state(),
-                self.volume(),
-                self.is_muted(),
-                self.input_source(),
-                self.sound_mode(),
-                self.codec(),
-                self.identifier(),
-            )
+        values = await asyncio.gather(
+            self.power_state(),
+            self.volume(),
+            self.is_muted(),
+            self.input_source(),
+            self.sound_mode(),
+            self.codec(),
+            self.identifier(),
+            return_exceptions=True,
         )
-        return {
-            "power": power,
-            "volume": volume,
-            "mute": mute,
-            "input_source": source,
-            "sound_mode": sound_mode,
-            "codec": codec,
-            "identifier": identifier,
-        }
+        keys = (
+            "power",
+            "volume",
+            "mute",
+            "input_source",
+            "sound_mode",
+            "codec",
+            "identifier",
+        )
+        status = {}
+        for key, value in zip(keys, values, strict=True):
+            if key in ("codec", "identifier") and isinstance(
+                value, LocalRpcMethodNotFoundError
+            ):
+                value = None
+            if isinstance(value, BaseException):
+                raise value
+            status[key] = value
+        return status
 
     @staticmethod
     def _redact_token(token: str) -> str:
