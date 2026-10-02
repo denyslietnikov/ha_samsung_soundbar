@@ -61,6 +61,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 
 class EqPresetSelectEntity(SelectEntity):
+    _soundbar_cloud_only = True
+
     def __init__(
         self,
         device: SoundbarDevice,
@@ -156,7 +158,9 @@ class SoundModeSelectEntity(SelectEntity, RestoreEntity):
 
     async def async_update(self) -> None:
         """Refresh local sound mode before publishing the select state."""
-        if self.__device.hybrid_mode:
+        if self.__device.coordinator is not None:
+            await self.__device.coordinator.async_request_refresh()
+        elif self.__device.hybrid_mode:
             await self.__device.update_local_input_source()
 
     async def async_select_option(self, option: str) -> None:
@@ -216,7 +220,10 @@ class InputSelectEntity(SelectEntity, RestoreEntity):
 
     async def async_update(self) -> None:
         """Refresh the input source quickly in hybrid mode."""
-        if self.__device.hybrid_mode:
+        if self.__device.coordinator is not None:
+            await self.__device.coordinator.async_request_refresh()
+            return
+        elif self.__device.hybrid_mode:
             await self.__device.update_local_input_source()
             return
         await self.__device.update()

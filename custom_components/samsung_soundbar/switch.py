@@ -74,6 +74,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 
 class SoundbarSwitchAdvancedAudio(SwitchEntity):
+    _soundbar_cloud_only = True
+
     def __init__(
         self,
         device: SoundbarDevice,
@@ -112,7 +114,7 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
     # ------ STATE FUNCTIONS --------
     @property
     def is_on(self) -> bool:
-        if self.__device.has_advanced_audio_state:
+        if self.__device.coordinator is not None or self.__device.has_advanced_audio_state:
             return bool(self.__state_function())
         return bool(self.__state)
 

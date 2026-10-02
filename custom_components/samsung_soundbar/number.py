@@ -37,6 +37,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 
 class SoundbarWooferNumberEntity(NumberEntity):
+    _soundbar_cloud_only = True
+
     def __init__(
         self,
         device: SoundbarDevice,

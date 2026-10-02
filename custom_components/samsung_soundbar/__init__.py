@@ -1,5 +1,3 @@
-import asyncio
-import datetime
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -21,7 +19,6 @@ from homeassistant.helpers import (
     entity_registry as er,
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_track_time_interval
 from pysmartthings.exceptions import (
     SmartThingsAuthenticationFailedError,
     SmartThingsConnectionError,
@@ -74,6 +71,7 @@ from .const import (
     SERVICE_DUMP_STATUS_SUMMARY,
 )
 from .device_info import async_unmerge_official_smartthings_device
+from .coordinator import SoundbarCoordinator
 from .entry_options import get_entry_option
 from .local_device import LocalDevice
 from .local_rpc import (
@@ -89,8 +87,6 @@ from .subscription import async_remove_subscription, async_setup_subscription
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["media_player", "switch", "number", "select", "sensor"]
-LOCAL_ONLY_POLL_INTERVAL = datetime.timedelta(seconds=2)
-HYBRID_CLOUD_POLL_INTERVAL = datetime.timedelta(seconds=15)
 
 DUMP_EXECUTE_PAYLOAD_SCHEMA = vol.Schema(
     {
@@ -237,7 +233,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "SmartThings service is temporarily unavailable"
             ) from err
 
-        except Exception as err:
+        except Exception:
             _LOGGER.exception(
                 "[%s] Unexpected error while loading device %s",
                 DOMAIN,
@@ -284,7 +280,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             suggested_area=suggested_area,
         )
 
-        await soundbar_device.update()
+        coordinator = SoundbarCoordinator(hass, entry, soundbar_device)
+        await coordinator.async_refresh()
 
         domain_config.devices[device_id] = DeviceConfig(
             entry.data,
@@ -304,14 +301,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     if subscription is not None:
         domain_config.subscriptions[entry.entry_id] = subscription
-
-    if (
-        control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
-        and domain_config.devices[device_id].device.hybrid_mode
-    ):
-        soundbar_device = domain_config.devices[device_id].device
-        _async_schedule_local_polling(hass, entry, soundbar_device)
-        _async_schedule_hybrid_cloud_polling(hass, entry, soundbar_device)
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
@@ -370,66 +359,15 @@ async def _async_setup_local_only_entry(
             local_rpc=local_rpc,
             local_fallback_to_cloud=False,
         )
-        await soundbar_device.update()
+        coordinator = SoundbarCoordinator(hass, entry, soundbar_device)
+        await coordinator.async_refresh()
         domain_config.devices[device_id] = DeviceConfig(entry.data, soundbar_device)
 
     async_unmerge_official_smartthings_device(hass, entry, device_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    soundbar_device = domain_config.devices[device_id].device
-    _async_schedule_local_polling(hass, entry, soundbar_device)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
-
-
-def _async_schedule_local_polling(
-    hass: HomeAssistant, entry: ConfigEntry, device: SoundbarDevice
-) -> None:
-    """Keep a single fast local readback loop for one config entry."""
-    refresh_lock = asyncio.Lock()
-
-    async def async_refresh_local_state(_now: datetime.datetime) -> None:
-        if refresh_lock.locked():
-            return
-        async with refresh_lock:
-            await device.update_local_input_source(min_age=None)
-
-    entry.async_on_unload(
-        async_track_time_interval(
-            hass, async_refresh_local_state, LOCAL_ONLY_POLL_INTERVAL
-        )
-    )
-
-
-def _async_schedule_hybrid_cloud_polling(
-    hass: HomeAssistant, entry: ConfigEntry, device: SoundbarDevice
-) -> None:
-    """Refresh optional SmartThings state without repeating local RPC reads."""
-    refresh_lock = asyncio.Lock()
-    reauth_started = False
-
-    async def async_refresh_cloud_state(_now: datetime.datetime) -> None:
-        nonlocal reauth_started
-        if refresh_lock.locked() or reauth_started:
-            return
-        async with refresh_lock:
-            try:
-                await device.update_cloud_status()
-            except ConfigEntryAuthFailed:
-                if not reauth_started:
-                    reauth_started = True
-                    entry.async_start_reauth(hass)
-            except (ConfigEntryNotReady, SmartThingsConnectionError) as err:
-                device.handle_smartthings_availability(False)
-                _LOGGER.debug("[%s] Hybrid cloud refresh unavailable: %s", DOMAIN, err)
-            except HomeAssistantError as err:
-                _LOGGER.warning("[%s] Hybrid cloud refresh failed: %s", DOMAIN, err)
-
-    entry.async_on_unload(
-        async_track_time_interval(
-            hass, async_refresh_cloud_state, HYBRID_CLOUD_POLL_INTERVAL
-        )
-    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
@@ -438,6 +376,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     if unload_ok:
         domain_data = hass.data.get(DOMAIN)
         if domain_data:
+            device_config = domain_data.devices.get(entry.data.get(CONF_ENTRY_DEVICE_ID))
+            if device_config is not None and device_config.device.coordinator is not None:
+                await device_config.device.coordinator.async_shutdown()
             subscription = domain_data.subscriptions.pop(entry.entry_id, None)
             if subscription is not None:
                 await async_remove_subscription(entry, subscription)
@@ -569,7 +510,6 @@ def _async_create_dump_discovery_snapshot_service(hass: HomeAssistant):
             domain_config,
             call.data.get(CONF_HA_DEVICE_ID),
         )
-        _require_cloud_device(soundbar_device)
         return await soundbar_device.async_dump_discovery_snapshot(
             include_null=call.data[CONF_INCLUDE_NULL],
             include_raw_status=call.data[CONF_INCLUDE_RAW_STATUS],

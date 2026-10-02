@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import re
+from time import time
 from typing import Any, TypeVar
 
 from aiohttp import ClientResponseError
@@ -33,6 +34,7 @@ from ..local_rpc import (
     LocalRpcError,
     LocalSoundbarRpcClient,
 )
+from ..coordinator import coordinated_command
 
 log = logging.getLogger(__name__)
 
@@ -169,6 +171,7 @@ class SoundbarDevice:
             suggested_area: str | None = None,
     ):
         self.device = device
+        self.coordinator = None
         self._device_id = self.device.device_id
         self.__auth_provider = auth_provider
         self.__session = session
@@ -231,6 +234,9 @@ class SoundbarDevice:
         self.__max_volume = max_volume
 
     async def update(self):
+        if self.coordinator is not None:
+            await self.coordinator.async_request_refresh()
+            return
         if self.local_only:
             await self.update_local_status(min_age=None)
             return
@@ -245,6 +251,9 @@ class SoundbarDevice:
         if self.__auth_provider is not None:
             await self.__auth_provider.async_get_access_token()
 
+        observed_at = (
+            self.coordinator.state.clock() if self.coordinator is not None else None
+        )
         await self.__call_smartthings(
             self.device.status.refresh,
             "refresh device status",
@@ -262,6 +271,7 @@ class SoundbarDevice:
             await self._update_woofer()
         if self.__enable_eq:
             await self._update_equalizer()
+        self.__capture_cloud_state(observed_at=observed_at)
         if self.hybrid_mode:
             self.__notify_update_listeners()
 
@@ -329,10 +339,14 @@ class SoundbarDevice:
     @property
     def available(self) -> bool:
         """Return whether either configured transport is available."""
+        if self.coordinator is not None:
+            return self.coordinator.state.snapshot().available
         return self.__cloud_available or (self.hybrid_mode and self.__local_available)
 
     def add_update_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
         """Add a listener notified after push updates."""
+        if self.coordinator is not None:
+            return self.coordinator.async_add_listener(listener)
         self.__update_listeners.add(listener)
         return lambda: self.__update_listeners.discard(listener)
 
@@ -348,6 +362,15 @@ class SoundbarDevice:
         self.__sync_optimistic_mute()
         if str(getattr(event.attribute, "value", event.attribute)) == "audioTrackData":
             await self._update_media()
+        observed_at = None
+        event_time = getattr(event, "event_time", None)
+        if self.coordinator is not None and isinstance(event_time, (int, float)):
+            event_time = event_time / 1000 if event_time > 1e12 else event_time
+            observed_at = self.coordinator.state.clock() + min(0, event_time - time())
+        self.__capture_cloud_state(
+            str(getattr(event.attribute, "value", event.attribute)),
+            observed_at=observed_at,
+        )
         self.__notify_update_listeners()
 
     def handle_smartthings_availability(self, available: bool) -> None:
@@ -355,17 +378,24 @@ class SoundbarDevice:
         self.__set_cloud_available(available)
 
     def __set_cloud_available(self, available: bool) -> None:
+        if self.coordinator is not None:
+            self.coordinator.transport_changed("cloud", available)
         if self.__cloud_available == available:
             return
         self.__cloud_available = available
         self.__notify_update_listeners()
 
     def __notify_update_listeners(self) -> None:
+        if self.coordinator is not None:
+            self.coordinator.publish()
+            return
         for listener in tuple(self.__update_listeners):
             listener()
 
     @property
     def local_available(self) -> bool:
+        if self.coordinator is not None:
+            return self.coordinator.state.transport_available["local"]
         return self.__local_available
 
     @property
@@ -374,10 +404,14 @@ class SoundbarDevice:
 
     @property
     def local_codec(self) -> str | None:
+        if self.coordinator is not None:
+            return self.__coordinated_value("local_codec")
         return self.__local_value("codec")
 
     @property
     def local_identifier(self) -> str | None:
+        if self.coordinator is not None:
+            return self.__coordinated_value("local_identifier")
         return self.__local_value("identifier")
 
     async def __update_local_status(self) -> None:
@@ -444,6 +478,13 @@ class SoundbarDevice:
             self.__local_status_updated_at = datetime.datetime.now()
             self.__local_available = True
             self.__local_last_error = None
+            self.__capture_local_state(
+                {
+                    key: local_status.get(key)
+                    for key, value in readback.items()
+                    if self.__normalize_local_value(value) is not None
+                }
+            )
             if sound_mode_readback_missing:
                 self.__expire_optimistic_sound_mode()
             else:
@@ -458,6 +499,8 @@ class SoundbarDevice:
                 and self.__has_cached_local_status(_LOCAL_STATUS_CACHE_TIMEOUT)
             )
             self.__local_last_error = str(err)
+            if self.coordinator is not None:
+                self.coordinator.transport_changed("local", False)
             if self.hybrid_mode and was_available != self.__local_available:
                 self.__notify_update_listeners()
             log.debug(
@@ -524,6 +567,8 @@ class SoundbarDevice:
                     and self.__has_cached_local_status(_LOCAL_STATUS_CACHE_TIMEOUT)
                 )
                 self.__local_last_error = str(err)
+                if self.coordinator is not None:
+                    self.coordinator.transport_changed("local", False)
                 if self.hybrid_mode and was_available != self.__local_available:
                     self.__notify_update_listeners()
                 log.debug(
@@ -572,6 +617,17 @@ class SoundbarDevice:
             self.__local_status_updated_at = datetime.datetime.now()
             self.__local_available = True
             self.__local_last_error = None
+            self.__capture_local_state(
+                {
+                    key: self.__local_status.get(key)
+                    for key, value in zip(
+                        ("power", "input_source", "volume", "mute", "sound_mode"),
+                        values,
+                        strict=True,
+                    )
+                    if self.__normalize_local_value(value) is not None
+                }
+            )
             if not was_available or previous_status != self.__local_status:
                 self.__notify_update_listeners()
 
@@ -587,7 +643,8 @@ class SoundbarDevice:
             await action(self.__local_rpc)
             self.__local_available = True
             self.__local_last_error = None
-            await self.update_local_status(min_age=None)
+            if self.coordinator is None or not self.coordinator.in_command:
+                await self.update_local_status(min_age=None)
             return True
         except (LocalRpcCommandError, ValueError) as err:
             # A rejected or partially completed command is not a LAN failure.
@@ -599,6 +656,8 @@ class SoundbarDevice:
         except LocalRpcError as err:
             self.__local_available = False
             self.__local_last_error = str(err)
+            if self.coordinator is not None:
+                self.coordinator.transport_changed("local", False)
             log.warning(
                 "[%s] Local RPC failed during %s for %s: %s",
                 DOMAIN,
@@ -611,6 +670,131 @@ class SoundbarDevice:
             raise HomeAssistantError(
                 f"Local soundbar RPC failed during {description}: {err}"
             ) from err
+
+    def __capture_local_state(self, readback: dict[str, Any]) -> None:
+        if self.coordinator is None:
+            return
+        values = {}
+        for key, value in readback.items():
+            if value is None:
+                continue
+            if key == "power":
+                values["power"] = "off" if value == "powerOff" else "on"
+            elif key == "volume":
+                values["volume_level"] = value / _LOCAL_VOLUME_MAX
+            elif key == "mute":
+                values["volume_muted"] = value
+            elif key == "input_source":
+                values["input_source"] = self.__ha_source_from_local(value)
+                values["sound_from_detail_name"] = (
+                    _LOCAL_STREAMING_SOURCE_TO_DETAIL.get(value, "External Device")
+                )
+            elif key == "sound_mode" and readback.get("power") != "powerOff":
+                values["sound_mode"] = self.__ha_sound_mode_from_local(value)
+            elif key in ("codec", "identifier"):
+                values[f"local_{key}"] = value
+        if readback.get("power") == "powerOff":
+            values["sound_from_detail_name"] = ""
+        self.coordinator.state.transport_available["local"] = True
+        self.coordinator.receive("local", values)
+
+    def __capture_cloud_state(
+        self, attribute: str | None = None, *, observed_at: float | None = None
+    ) -> None:
+        if self.coordinator is None:
+            return
+        status = self.device.status
+        # The compat facade defaults missing public attributes to zero/False.
+        # Use raw attribute values to keep partial responses from fabricating state.
+        raw = isinstance(getattr(status, "_components", None), dict)
+        power = status.attribute_value("switch", "switch") if raw else status.switch
+        volume = (
+            status.attribute_value("audioVolume", "volume") if raw else status.volume
+        )
+        mute = status.attribute_value("audioMute", "mute") if raw else status.mute
+        detail = self.__clean_media_value(status.sound_from_detail_name)
+        detail = self.__canonical_sound_from_detail(detail) if detail else None
+        source = (
+            "WIFI"
+            if detail in ("AirPlay", "Google Cast", "Roon", "Spotify")
+            else status.input_source
+        )
+        values = {
+            "power": None
+            if power is None
+            else ("on" if power in (True, "on") else "off"),
+            "volume_level": None
+            if volume is None
+            else min(int(volume), self.volume_scale) / self.volume_scale,
+            "volume_muted": None if mute is None else mute in (True, "muted", "on"),
+            "input_source": source,
+            "sound_from_detail_name": detail,
+            "media_title": self.__media_title,
+            "media_artist": self.__media_artist,
+            "media_coverart_url": self.__media_cover_url or "",
+            "playback_status": status.playback_status,
+            "sound_from_mode": status.sound_from_mode,
+            "media_duration": getattr(
+                status.attributes.get("totalTime"), "value", None
+            ),
+            "media_position": getattr(
+                status.attributes.get("elapsedTime"), "value", None
+            ),
+        }
+        if attribute is not None:
+            keys = {
+                "switch": ("power",),
+                "volume": ("volume_level",),
+                "mute": ("volume_muted",),
+                "inputSource": ("input_source",),
+                "detailName": ("sound_from_detail_name", "input_source"),
+                "audioTrackData": ("media_title", "media_artist", "media_coverart_url"),
+                "playbackStatus": ("playback_status",),
+                "mode": ("sound_from_mode",),
+                "totalTime": ("media_duration",),
+                "elapsedTime": ("media_position",),
+            }.get(attribute, ())
+            values = {key: values[key] for key in keys}
+        if (
+            raw
+            and getattr(status.attributes.get("audioTrackData"), "value", None) is None
+        ):
+            for key in ("media_title", "media_artist", "media_coverart_url"):
+                values.pop(key, None)
+        self.coordinator.state.transport_available["cloud"] = True
+        self.coordinator.receive("cloud", values, observed_at=observed_at)
+
+    async def read_local_fields(self, fields: set[str]) -> None:
+        """Read only fields affected by a successful local command."""
+        methods = {
+            "power": ("power", self.__local_rpc.power_state),
+            "volume_level": ("volume", self.__local_rpc.volume),
+            "volume_muted": ("mute", self.__local_rpc.is_muted),
+            "input_source": ("input_source", self.__local_rpc.input_source),
+            "sound_mode": ("sound_mode", self.__local_rpc.sound_mode),
+        }
+        readback = {}
+        try:
+            async with self.__local_status_update_lock:
+                for field in fields:
+                    if field not in methods:
+                        continue
+                    key, method = methods[field]
+                    readback[key] = await method()
+                self.__local_status.update(
+                    {key: value for key, value in readback.items() if value is not None}
+                )
+                self.__capture_local_state(readback)
+                self.__local_available = True
+                self.__local_last_error = None
+        except LocalRpcError as err:
+            self.__local_available = False
+            self.__local_last_error = str(err)
+            self.coordinator.transport_changed("local", False)
+            raise
+
+    def __coordinated_value(self, key: str, default=None):
+        return self.coordinator.state.value(key, default)
 
     def __local_value(self, key: str) -> Any:
         return self.__local_status_value(key, allow_cached=False)
@@ -1076,6 +1260,8 @@ class SoundbarDevice:
         ]
         self.__active_soundmode = payload["x.com.samsung.networkaudio.soundmode"]
         self.__soundmode_supported = True
+        if self.coordinator is not None:
+            self.coordinator.receive("cloud", {"sound_mode": self.__active_soundmode})
 
     async def _update_woofer(self):
         payload = await self.async_request_execute_payload(
@@ -1090,6 +1276,8 @@ class SoundbarDevice:
         self.__woofer_level = payload["x.com.samsung.networkaudio.woofer"]
         self.__woofer_connection = payload["x.com.samsung.networkaudio.connection"]
         self.__woofer_supported = True
+        if self.coordinator is not None:
+            self.coordinator.receive("cloud", {"woofer_level": self.__woofer_level})
 
     async def _update_equalizer(self):
         payload = await self.async_request_execute_payload(
@@ -1110,6 +1298,10 @@ class SoundbarDevice:
         self.__eq_action = payload["x.com.samsung.networkaudio.action"]
         self.__eq_bands = payload["x.com.samsung.networkaudio.EQband"]
         self.__equalizer_supported = True
+        if self.coordinator is not None:
+            self.coordinator.receive(
+                "cloud", {"active_equalizer_preset": self.__active_eq_preset}
+            )
 
     async def _update_advanced_audio(self):
         payload = await self.async_request_execute_payload(
@@ -1127,6 +1319,17 @@ class SoundbarDevice:
         self.__voice_amplifier = payload["x.com.samsung.networkaudio.voiceamplifier"]
         self.__virtual_sound = payload.get("x.com.samsung.networkaudio.virtual", 0)
         self.__advanced_audio_supported = True
+        if self.coordinator is not None:
+            values = {
+                "night_mode": self.__night_mode,
+                "bass_mode": self.__bass_mode,
+                "voice_amplifier": self.__voice_amplifier,
+                "virtual_sound": payload.get("x.com.samsung.networkaudio.virtual"),
+            }
+            self.coordinator.receive(
+                "cloud",
+                {key: value == 1 for key, value in values.items() if value in (0, 1)},
+            )
 
     @property
     def status(self):
@@ -1231,6 +1434,12 @@ class SoundbarDevice:
 
     @property
     def state(self) -> str:
+        if self.coordinator is not None:
+            power = self.__coordinated_value("power")
+            playback = self.__coordinated_value("playback_status")
+            if power == "on" and playback in ("playing", "paused"):
+                return playback
+            return power
         local_power = self.__local_value("power")
         if local_power is not None:
             if local_power == "powerOff":
@@ -1251,6 +1460,7 @@ class SoundbarDevice:
         else:
             return "off"
 
+    @coordinated_command(lambda self: {"power": "off"})
     async def switch_off(self):
         if await self.__try_local_rpc(lambda local: local.power_off(), "switch off"):
             return
@@ -1260,6 +1470,7 @@ class SoundbarDevice:
             "switch off",
         )
 
+    @coordinated_command(lambda self: {"power": "on"})
     async def switch_on(self):
         if await self.__try_local_rpc(lambda local: local.power_on(), "switch on"):
             return
@@ -1272,7 +1483,13 @@ class SoundbarDevice:
     # ------------ VOLUME --------------
 
     @property
+    def volume_scale(self) -> int:
+        return _LOCAL_VOLUME_MAX if self.hybrid_mode else self.__max_volume
+
+    @property
     def volume_level(self) -> float:
+        if self.coordinator is not None:
+            return self.__coordinated_value("volume_level")
         local_volume = self.__local_value("volume")
         if local_volume is not None:
             return min(local_volume, _LOCAL_VOLUME_MAX) / _LOCAL_VOLUME_MAX
@@ -1286,6 +1503,8 @@ class SoundbarDevice:
 
     @property
     def volume_muted(self) -> bool:
+        if self.coordinator is not None:
+            return self.__coordinated_value("volume_muted")
         local_mute = self.__local_value("mute")
         if local_mute is not None:
             return bool(local_mute)
@@ -1294,6 +1513,11 @@ class SoundbarDevice:
             return self.__optimistic_mute
         return self.device.status.mute
 
+    @coordinated_command(
+        lambda self, volume: {
+            "volume_level": int(volume * self.volume_scale) / self.volume_scale
+        }
+    )
     async def set_volume(self, volume: float):
         """
         Sets the volume to a certain level.
@@ -1315,6 +1539,7 @@ class SoundbarDevice:
             "set volume",
         )
 
+    @coordinated_command(lambda self, mute: {"volume_muted": mute})
     async def mute_volume(self, mute: bool):
         if self.hybrid_mode:
             if mute == self.volume_muted:
@@ -1389,6 +1614,7 @@ class SoundbarDevice:
             self.__optimistic_sound_mode = None
             self.__optimistic_sound_mode_updated_at = None
 
+    @coordinated_command(read_fields=("volume_level",))
     async def volume_up(self):
         if await self.__try_local_rpc(lambda local: local.volume_up(), "volume up"):
             return
@@ -1398,6 +1624,7 @@ class SoundbarDevice:
             "volume up",
         )
 
+    @coordinated_command(read_fields=("volume_level",))
     async def volume_down(self):
         if await self.__try_local_rpc(lambda local: local.volume_down(), "volume down"):
             return
@@ -1411,12 +1638,15 @@ class SoundbarDevice:
 
     @property
     def woofer_level(self) -> int:
+        if self.coordinator is not None:
+            return self.__coordinated_value("woofer_level")
         return self.__woofer_level
 
     @property
     def woofer_connection(self) -> str:
         return self.__woofer_connection
 
+    @coordinated_command(lambda self, level: {"woofer_level": level}, cloud_only=True)
     async def set_woofer(self, level: int):
         await self.set_custom_execution_data(
             href="/sec/networkaudio/woofer",
@@ -1429,6 +1659,11 @@ class SoundbarDevice:
 
     @property
     def input_source(self):
+        if self.coordinator is not None:
+            return self.__coordinated_value(
+                "input_source",
+                self.__last_known_input_source if self.state == "off" else None,
+            )
         local_source = self.__local_value("input_source")
         if local_source is not None:
             return self.__ha_source_from_local(local_source)
@@ -1452,6 +1687,8 @@ class SoundbarDevice:
 
     @property
     def sound_from_detail_name(self) -> str | None:
+        if self.coordinator is not None:
+            return self.__coordinated_value("sound_from_detail_name") or None
         if self.hybrid_mode and self.__has_fresh_local_status(
             _LOCAL_STREAMING_SOURCE_CACHE_TIMEOUT
         ):
@@ -1474,6 +1711,8 @@ class SoundbarDevice:
 
     @property
     def sound_from_mode(self) -> int | None:
+        if self.coordinator is not None:
+            return self.__coordinated_value("sound_from_mode")
         return self.device.status.sound_from_mode
 
     @property
@@ -1518,6 +1757,15 @@ class SoundbarDevice:
 
         return bool(self.supported_input_sources)
 
+    @coordinated_command(
+        lambda self, source: {
+            "input_source": self.__ha_source_from_local(
+                self.__local_source_from_ha(source)
+            )
+            if self.hybrid_mode
+            else source
+        }
+    )
     async def select_source(self, source: str):
         if self.hybrid_mode:
             local_source = self.__local_source_from_ha(source)
@@ -1550,6 +1798,13 @@ class SoundbarDevice:
     # ------------- SOUND MODE --------------
     @property
     def sound_mode(self):
+        if self.coordinator is not None:
+            return self.__coordinated_value(
+                "sound_mode",
+                self.__ha_sound_mode_from_local(self.__last_known_sound_mode)
+                if self.state == "off" and self.__last_known_sound_mode
+                else None,
+            )
         local_sound_mode = self.__local_value("sound_mode")
         if local_sound_mode is not None:
             return self.__ha_sound_mode_from_local(local_sound_mode)
@@ -1573,6 +1828,7 @@ class SoundbarDevice:
             return list(dict.fromkeys(sound_modes))
         return self.__supported_soundmodes
 
+    @coordinated_command(lambda self, sound_mode: {"sound_mode": sound_mode})
     async def select_sound_mode(self, sound_mode: str):
         if self.hybrid_mode:
             local_sound_mode = self.__local_sound_mode_from_ha(sound_mode)
@@ -1595,8 +1851,11 @@ class SoundbarDevice:
 
     @property
     def night_mode(self) -> bool:
+        if self.coordinator is not None:
+            return self.__coordinated_value("night_mode", False)
         return True if self.__night_mode == 1 else False
 
+    @coordinated_command(lambda self, value: {"night_mode": value}, cloud_only=True)
     async def set_night_mode(self, value: bool):
         await self.set_custom_execution_data(
             href="/sec/networkaudio/advancedaudio",
@@ -1607,8 +1866,11 @@ class SoundbarDevice:
 
     @property
     def bass_mode(self) -> bool:
+        if self.coordinator is not None:
+            return self.__coordinated_value("bass_mode", False)
         return True if self.__bass_mode == 1 else False
 
+    @coordinated_command(lambda self, value: {"bass_mode": value}, cloud_only=True)
     async def set_bass_mode(self, value: bool):
         await self.set_custom_execution_data(
             href="/sec/networkaudio/advancedaudio",
@@ -1619,8 +1881,13 @@ class SoundbarDevice:
 
     @property
     def voice_amplifier(self) -> bool:
+        if self.coordinator is not None:
+            return self.__coordinated_value("voice_amplifier", False)
         return True if self.__voice_amplifier == 1 else False
 
+    @coordinated_command(
+        lambda self, value: {"voice_amplifier": value}, cloud_only=True
+    )
     async def set_voice_amplifier(self, value: bool):
         await self.set_custom_execution_data(
             href="/sec/networkaudio/advancedaudio",
@@ -1631,8 +1898,11 @@ class SoundbarDevice:
 
     @property
     def virtual_sound(self) -> bool:
+        if self.coordinator is not None:
+            return self.__coordinated_value("virtual_sound", False)
         return True if self.__virtual_sound == 1 else False
 
+    @coordinated_command(lambda self, value: {"virtual_sound": value}, cloud_only=True)
     async def set_virtual_sound(self, value: bool):
         await self.set_custom_execution_data(
             href="/sec/networkaudio/advancedaudio",
@@ -1645,6 +1915,8 @@ class SoundbarDevice:
 
     @property
     def active_equalizer_preset(self):
+        if self.coordinator is not None:
+            return self.__coordinated_value("active_equalizer_preset")
         return self.__active_eq_preset
 
     @property
@@ -1659,6 +1931,9 @@ class SoundbarDevice:
     def equalizer_bands(self):
         return self.__eq_bands
 
+    @coordinated_command(
+        lambda self, preset: {"active_equalizer_preset": preset}, cloud_only=True
+    )
     async def set_equalizer_preset(self, preset: str):
         await self.set_custom_execution_data(
             href="/sec/networkaudio/eq",
@@ -1669,14 +1944,20 @@ class SoundbarDevice:
     # ------------- MEDIA ----------------
     @property
     def media_title(self):
+        if self.coordinator is not None:
+            return self.__coordinated_value("media_title", "")
         return self.__media_title
 
     @property
     def media_artist(self):
+        if self.coordinator is not None:
+            return self.__coordinated_value("media_artist", "")
         return self.__media_artist
 
     @property
     def media_coverart_url(self) -> str | None:
+        if self.coordinator is not None:
+            return self.__coordinated_value("media_coverart_url") or None
         return self.__media_cover_url
 
     @property
@@ -1692,28 +1973,37 @@ class SoundbarDevice:
 
     @property
     def media_duration(self) -> int | None:
+        if self.coordinator is not None:
+            return self.__coordinated_value("media_duration")
         attr = self.device.status.attributes.get("totalTime", None)
         if attr:
             return attr.value
 
     @property
     def media_position(self) -> int | None:
+        if self.coordinator is not None:
+            return self.__coordinated_value("media_position")
         attr = self.device.status.attributes.get("elapsedTime", None)
         if attr:
             return attr.value
 
+    @coordinated_command(cloud_only=True)
     async def media_play(self):
         await self.__call_playback_command("play", "media play")
 
+    @coordinated_command(cloud_only=True)
     async def media_pause(self):
         await self.__call_playback_command("pause", "media pause")
 
+    @coordinated_command(cloud_only=True)
     async def media_stop(self):
         await self.__call_playback_command("stop", "media stop")
 
+    @coordinated_command(cloud_only=True)
     async def media_next_track(self):
         await self.__call_playback_command("fastForward", "media next track")
 
+    @coordinated_command(cloud_only=True)
     async def media_previous_track(self):
         await self.__call_playback_command("rewind", "media previous track")
 
@@ -1730,6 +2020,8 @@ class SoundbarDevice:
 
     @property
     def media_app_name(self):
+        if self.coordinator is not None:
+            return self.sound_from_detail_name
         if self.hybrid_mode and self.__has_fresh_local_status(
             _LOCAL_STREAMING_SOURCE_CACHE_TIMEOUT
         ):
@@ -1792,6 +2084,7 @@ class SoundbarDevice:
             "update execution data",
         )
 
+    @coordinated_command(cloud_only=True)
     async def set_custom_execution_data(self, href: str, property: str, value):
         argument = [href, {property: value}]
         await self.__call_smartthings(
@@ -1893,7 +2186,9 @@ class SoundbarDevice:
             ),
             "write_probe_results": write_probe_results,
             "write_probe_raw_statuses": write_probe_raw_statuses,
-            "q800f_ui_status": self.__q800f_ui_status_summary(),
+            "q800f_ui_status": {}
+            if self.local_only
+            else self.__q800f_ui_status_summary(),
             "raw_statuses": raw_statuses,
             "raw_device_statuses": raw_device_statuses,
             "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -1993,18 +2288,20 @@ class SoundbarDevice:
         sleep_time: float = 0.3,
     ) -> dict[str, Any]:
         """Return raw/flattened SmartThings state for before-after discovery."""
-        await self.__call_smartthings(
-            self.device.status.refresh,
-            "refresh device status for discovery snapshot",
-        )
-        await self.__update_local_status()
+        if self.coordinator is not None:
+            await self.coordinator.async_refresh_all()
+        else:
+            if not self.local_only:
+                await self.update_cloud_status()
+            await self.update_local_status(min_age=None)
 
-        status_data = await self.get_device_status_raw()
+        status_data = {} if self.local_only else await self.get_device_status_raw()
         result: dict[str, Any] = {
             "device_id": self.device_id,
             "device_name": self.device_name,
             "include_null": include_null,
             "control_mode": self.control_mode,
+            "cloud_enabled": not self.local_only,
             "local": {
                 "available": self.local_available,
                 "last_error": self.local_last_error,
@@ -2019,7 +2316,12 @@ class SoundbarDevice:
                 "status": self.__json_safe(self.__local_status),
             },
             "resolved": self.retrieve_data,
-            "q800f_ui_status": self.__q800f_ui_status_summary(),
+            "coordinator": (
+                self.coordinator.diagnostics() if self.coordinator is not None else None
+            ),
+            "q800f_ui_status": (
+                {} if self.local_only else self.__q800f_ui_status_summary()
+            ),
             "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
         }
 
@@ -2034,12 +2336,12 @@ class SoundbarDevice:
                 if status.get("value") is not None
             ]
 
-        if include_execute_status:
+        if include_execute_status and not self.local_only:
             execute_status = await self.get_execute_status_raw()
             result["execute_status"] = execute_status
             result["execute_payload"] = self.__extract_execute_payload(execute_status)
 
-        if execute_hrefs:
+        if execute_hrefs and not self.local_only:
             result["execute_hrefs"] = await self.__dump_discovery_execute_hrefs(
                 execute_hrefs,
                 sleep_time=sleep_time,

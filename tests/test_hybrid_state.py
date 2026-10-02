@@ -3,11 +3,10 @@
 import asyncio
 import datetime
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 
-import custom_components.samsung_soundbar as integration
 from custom_components.samsung_soundbar.api_extension.SoundbarDevice import SoundbarDevice
 from custom_components.samsung_soundbar.const import (
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
@@ -17,6 +16,7 @@ from custom_components.samsung_soundbar.entity_updates import register_device_up
 from custom_components.samsung_soundbar.local_device import LocalDevice
 from custom_components.samsung_soundbar.local_rpc import LocalRpcCommandError, LocalRpcError
 from custom_components.samsung_soundbar.switch import SoundbarSwitchAdvancedAudio
+from custom_components.samsung_soundbar.coordinator import SoundbarCoordinator, LOCAL_INTERVAL
 
 
 class TestHybridState(IsolatedAsyncioTestCase):
@@ -205,10 +205,12 @@ class TestHybridState(IsolatedAsyncioTestCase):
 
 
 class TestHybridPolling(IsolatedAsyncioTestCase):
-    async def test_one_timer_per_transport_and_overlapping_ticks_coalesce(self) -> None:
+    async def test_one_coordinator_and_overlapping_ticks_coalesce(self) -> None:
         hass = MagicMock()
         entry = MagicMock()
         device = MagicMock()
+        device.local_only = False
+        device.hybrid_mode = True
         started = asyncio.Event()
         release = asyncio.Event()
 
@@ -217,33 +219,33 @@ class TestHybridPolling(IsolatedAsyncioTestCase):
             await release.wait()
 
         device.update_local_input_source = AsyncMock(side_effect=slow_local)
+        device.update_local_status = AsyncMock()
         device.update_cloud_status = AsyncMock()
-        with patch.object(integration, "async_track_time_interval") as timer:
-            integration._async_schedule_local_polling(hass, entry, device)
-            integration._async_schedule_hybrid_cloud_polling(hass, entry, device)
-        self.assertEqual(timer.call_count, 2)
-        self.assertEqual(timer.call_args_list[0].args[2], integration.LOCAL_ONLY_POLL_INTERVAL)
-        self.assertEqual(timer.call_args_list[1].args[2], integration.HYBRID_CLOUD_POLL_INTERVAL)
-        local_tick = timer.call_args_list[0].args[1]
-        first = asyncio.create_task(local_tick(None))
+        coordinator = SoundbarCoordinator(hass, entry, device)
+        coordinator._next_full_local = float("inf")
+        self.assertEqual(coordinator.update_interval, LOCAL_INTERVAL)
+        first = asyncio.create_task(coordinator._async_update_data())
         await started.wait()
-        await local_tick(None)
+        second = asyncio.create_task(coordinator._async_update_data())
+        await asyncio.sleep(0)
         release.set()
         await first
+        await second
         device.update_local_input_source.assert_awaited_once_with(min_age=None)
-        await timer.call_args_list[1].args[1](None)
         device.update_cloud_status.assert_awaited_once()
-        entry.async_on_unload.assert_any_call(timer.return_value)
+        entry.async_on_unload.assert_any_call(coordinator.async_shutdown)
 
     async def test_cloud_outage_does_not_start_local_reauth(self) -> None:
         hass = MagicMock()
         entry = MagicMock()
         device = MagicMock()
+        device.local_only = False
+        device.hybrid_mode = True
+        device.update_local_status = AsyncMock()
         device.update_cloud_status = AsyncMock(
             side_effect=ConfigEntryNotReady("offline")
         )
-        with patch.object(integration, "async_track_time_interval") as timer:
-            integration._async_schedule_hybrid_cloud_polling(hass, entry, device)
-        await timer.call_args.args[1](None)
+        coordinator = SoundbarCoordinator(hass, entry, device)
+        await coordinator._async_update_data()
         device.handle_smartthings_availability.assert_called_once_with(False)
         entry.async_start_reauth.assert_not_called()

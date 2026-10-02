@@ -49,8 +49,9 @@ class VolumeSensor(SensorEntity):
     @property
     def native_value(self) -> int | None:
         """Return the current soundbar volume."""
-        if self.__device.hybrid_mode:
-            return round(self.__device.volume_level * 100)
+        if self.__device.coordinator is not None or self.__device.hybrid_mode:
+            level = self.__device.volume_level
+            return None if level is None else round(level * self.__device.volume_scale)
         return self.__device.device.status.volume
 
 
@@ -96,7 +97,10 @@ class SoundFromSensor(SensorEntity):
 
     async def async_update(self) -> None:
         """Refresh the soundbar before reading the sound source detail."""
-        if self.__device.hybrid_mode:
+        if self.__device.coordinator is not None:
+            await self.__device.coordinator.async_request_refresh()
+            return
+        elif self.__device.hybrid_mode:
             await self.__device.update_local_input_source()
             return
         await self.__device.update()

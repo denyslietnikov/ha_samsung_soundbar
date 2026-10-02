@@ -31,6 +31,7 @@ from custom_components.samsung_soundbar.config_flow import (
 )
 from custom_components.samsung_soundbar.entry_options import DEFAULT_ENTRY_OPTIONS
 from custom_components.samsung_soundbar.local_rpc import LocalRpcError
+from custom_components.samsung_soundbar.coordinator import SoundbarCoordinator, LOCAL_INTERVAL
 
 
 LOCAL_STATUS = {
@@ -47,6 +48,10 @@ LOCAL_STATUS = {
 class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.hass = MagicMock()
+        self.hass.loop = asyncio.get_event_loop()
+        self.hass.is_stopping = False
+        self.hass.async_create_task.side_effect = lambda coro, *args, **kwargs: asyncio.create_task(coro)
+        self.hass.async_run_hass_job.side_effect = lambda job, **kwargs: asyncio.create_task(job.target())
         self.hass.data = {}
         self.hass.config_entries.async_forward_entry_setups = AsyncMock()
         self.hass.config_entries.async_unload_platforms = AsyncMock(
@@ -100,7 +105,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         )
         self.services = patch.object(integration, "_async_register_services")
         self.timer = patch.object(
-            integration, "async_track_time_interval", return_value=MagicMock()
+            SoundbarCoordinator, "_schedule_refresh"
         )
         for patcher in (
             self.cloud_auth,
@@ -114,7 +119,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
-        self.timer_mock = integration.async_track_time_interval
+        self.timer_mock = SoundbarCoordinator._schedule_refresh
 
     async def test_new_tokenless_entry_starts_and_reloads_without_cloud(self) -> None:
         self.entry.data = {
@@ -149,7 +154,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         self.assertEqual(self.rpc.status.await_count, 2)
         self.assertEqual(self.session.get.await_count, 0)
         self.assertEqual(self.session.post.await_count, 0)
-        self.assertEqual(self.timer_mock.call_count, 2)
+        self.assertEqual(device.coordinator.update_interval, LOCAL_INTERVAL)
         self.assertNotIn("image", integration.PLATFORMS)
 
     async def test_removes_only_legacy_artwork_entity(self) -> None:
@@ -290,10 +295,6 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
 
     async def test_one_local_poll_refreshes_shared_state(self) -> None:
         await async_setup_entry(self.hass, self.entry)
-        self.assertEqual(self.timer_mock.call_count, 1)
-        self.assertEqual(
-            self.timer_mock.call_args.args[2], integration.LOCAL_ONLY_POLL_INTERVAL
-        )
         self.rpc.power_state = AsyncMock(return_value="powerOn")
         self.rpc.input_source = AsyncMock(return_value="WIFI_AIRPLAY")
         self.rpc.volume = AsyncMock(return_value=9)
@@ -303,7 +304,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         listener = MagicMock()
         device.add_update_listener(listener)
 
-        await self.timer_mock.call_args.args[1](None)
+        await device.coordinator.async_refresh()
 
         self.assertEqual(device.volume_level, 0.09)
         self.assertEqual(device.sound_from_detail_name, "AirPlay")
@@ -327,7 +328,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         listener.assert_called_once()
         self.assertEqual(self.rpc.status.await_count, 1)
         self.assertEqual(self.session.get.await_count, 0)
-        self.entry.async_on_unload.assert_any_call(self.timer_mock.return_value)
+        self.entry.async_on_unload.assert_any_call(device.coordinator.async_shutdown)
 
     async def test_overlapping_local_ticks_do_not_duplicate_poll(self) -> None:
         await async_setup_entry(self.hass, self.entry)
@@ -340,12 +341,13 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
             await release.wait()
 
         device.update_local_input_source = AsyncMock(side_effect=slow_refresh)
-        tick = self.timer_mock.call_args.args[1]
-        first = asyncio.create_task(tick(None))
+        first = asyncio.create_task(device.coordinator._async_update_data())
         await started.wait()
-        await tick(None)
+        second = asyncio.create_task(device.coordinator._async_update_data())
+        await asyncio.sleep(0)
         release.set()
         await first
+        await second
         device.update_local_input_source.assert_awaited_once_with(min_age=None)
 
     async def test_local_entities_do_not_start_private_timers(self) -> None:

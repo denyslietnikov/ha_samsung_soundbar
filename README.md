@@ -123,6 +123,13 @@ firmware.
 
 ## Diagnostics
 
+Each entry uses one shared Home Assistant state coordinator. Local core state
+is polled every 2 seconds; cloud state every 15 seconds; full local status every
+60 seconds. Entities do not run their own network polls. Fresh local fields take
+priority in Hybrid, while partial responses retain each field's own age and TTL.
+Commands are serialized and followed by targeted local readback. A short write
+settling guard prevents stale replies from immediately undoing a successful command.
+
 The integration provides diagnostic actions under the `samsung_soundbar`
 domain. They are intended for investigating capability differences between
 models and firmware versions.
@@ -138,6 +145,11 @@ data:
 The result includes power, volume, mute, input source, sound mode, codec and
 local connection errors. Do not publish diagnostic output containing tokens or
 private network details.
+
+`dump_discovery_snapshot` includes coordinator field sources, ages, TTLs and
+pending writes. It also works in Local-only without issuing SmartThings requests;
+cloud-only diagnostic sections are omitted in that mode. Advanced Audio switches
+remain optimistic when the device does not provide readable cloud state.
 
 ## Limitations
 
