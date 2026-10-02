@@ -38,6 +38,26 @@ from ..coordinator import coordinated_command
 
 log = logging.getLogger(__name__)
 
+CLOUD_FIELD_CAPABILITIES = {
+    "power": ("switch",),
+    "volume_level": ("audioVolume",),
+    "volume_muted": ("audioMute",),
+    "input_source": ("mediaInputSource", "samsungvd.audioInputSource"),
+    "sound_from_detail_name": ("samsungvd.soundFrom", "samsungvd.audioSoundFrom"),
+    "sound_from_mode": ("samsungvd.soundFrom", "samsungvd.audioSoundFrom"),
+    "playback_status": ("mediaPlayback", "samsungvd.audioPlayback"),
+    "sound_mode": ("execute",),
+    "night_mode": ("execute",),
+    "bass_mode": ("execute",),
+    "voice_amplifier": ("execute",),
+    "virtual_sound": ("execute",),
+    "woofer_level": ("execute",),
+    "active_equalizer_preset": ("execute",),
+    "media_title": ("audioTrackData",),
+    "media_artist": ("audioTrackData",),
+    "media_coverart_url": ("audioTrackData",),
+}
+
 _T = TypeVar("_T")
 _AUTH_ERROR_STATUSES = {401, 403}
 _TRANSIENT_ERROR_STATUSES = {
@@ -263,13 +283,17 @@ class SoundbarDevice:
 
         await self._update_media()
 
-        if self.__enable_soundmode and not self.hybrid_mode:
+        if (
+            self.__enable_soundmode
+            and not self.hybrid_mode
+            and not self.cloud_feature_disabled("execute")
+        ):
             await self._update_soundmode()
-        if self.__enable_advanced_audio:
+        if self.__enable_advanced_audio and not self.cloud_feature_disabled("execute"):
             await self._update_advanced_audio()
-        if self.__enable_woofer:
+        if self.__enable_woofer and not self.cloud_feature_disabled("execute"):
             await self._update_woofer()
-        if self.__enable_eq:
+        if self.__enable_eq and not self.cloud_feature_disabled("execute"):
             await self._update_equalizer()
         self.__capture_cloud_state(observed_at=observed_at)
         if self.hybrid_mode:
@@ -378,6 +402,7 @@ class SoundbarDevice:
         self.__set_cloud_available(available)
 
     def __set_cloud_available(self, available: bool) -> None:
+        available = available and not self.cloud_main_disabled
         if self.coordinator is not None:
             self.coordinator.transport_changed("cloud", available)
         if self.__cloud_available == available:
@@ -692,6 +717,11 @@ class SoundbarDevice:
             elif key == "sound_mode" and readback.get("power") != "powerOff":
                 values["sound_mode"] = self.__ha_sound_mode_from_local(value)
             elif key in ("codec", "identifier"):
+                if (
+                    key == "identifier"
+                    and self.__coordinated_value("local_identifier") == value
+                ):
+                    continue
                 values[f"local_{key}"] = value
         if readback.get("power") == "powerOff":
             values["sound_from_detail_name"] = ""
@@ -761,7 +791,17 @@ class SoundbarDevice:
         ):
             for key in ("media_title", "media_artist", "media_coverart_url"):
                 values.pop(key, None)
-        self.coordinator.state.transport_available["cloud"] = True
+        excluded = {
+            key
+            for key, capabilities in CLOUD_FIELD_CAPABILITIES.items()
+            if self.cloud_feature_disabled(*capabilities)
+        }
+        self.coordinator.state.discard_cloud_fields(excluded)
+        values = {key: value for key, value in values.items() if key not in excluded}
+        values["capability_hygiene"] = getattr(status, "capability_hygiene", {})
+        self.coordinator.state.transport_available[
+            "cloud"
+        ] = not self.cloud_main_disabled
         self.coordinator.receive("cloud", values, observed_at=observed_at)
 
     async def read_local_fields(self, fields: set[str]) -> None:
@@ -794,6 +834,13 @@ class SoundbarDevice:
             raise
 
     def __coordinated_value(self, key: str, default=None):
+        record = self.coordinator.state.resolve(key)
+        if (
+            record is not None
+            and record.source != "local"
+            and self.cloud_feature_disabled(*CLOUD_FIELD_CAPABILITIES.get(key, ()))
+        ):
+            return default
         return self.coordinator.state.value(key, default)
 
     def __local_value(self, key: str) -> Any:
@@ -1383,6 +1430,22 @@ class SoundbarDevice:
         return bool(self.device.status.attributes.get(capability))
 
     @property
+    def cloud_main_disabled(self) -> bool:
+        check = getattr(self.device.status, "is_component_disabled", None)
+        return callable(check) and check("main") is True
+
+    def cloud_feature_disabled(self, *capabilities: str) -> bool:
+        """Respect explicit exclusions without using missing fields as exclusions."""
+        check = getattr(self.device.status, "is_disabled", None)
+        if not callable(check):
+            return False
+        return any(
+            check(capability) is True for capability in capabilities
+        ) and not any(
+            self.has_status_capability(capability) for capability in capabilities
+        )
+
+    @property
     def can_turn_on_off(self) -> bool:
         return self.hybrid_mode or self.has_status_capability("switch")
 
@@ -1406,6 +1469,7 @@ class SoundbarDevice:
             return True
         return bool(
             self.__enable_soundmode
+            and not self.cloud_feature_disabled("execute")
             and self.__soundmode_supported
             and self.supported_soundmodes
         )
@@ -1414,17 +1478,24 @@ class SoundbarDevice:
     def can_select_equalizer_preset(self) -> bool:
         return bool(
             self.__enable_eq
+            and not self.cloud_feature_disabled("execute")
             and self.__equalizer_supported
             and self.supported_equalizer_presets
         )
 
     @property
     def can_control_woofer_level(self) -> bool:
-        return bool(self.__enable_woofer and self.__woofer_supported)
+        return bool(
+            self.__enable_woofer
+            and self.__woofer_supported
+            and not self.cloud_feature_disabled("execute")
+        )
 
     @property
     def can_control_advanced_audio(self) -> bool:
-        return self.__enable_advanced_audio
+        return self.__enable_advanced_audio and not self.cloud_feature_disabled(
+            "execute"
+        )
 
     @property
     def has_advanced_audio_state(self) -> bool:
@@ -2302,6 +2373,7 @@ class SoundbarDevice:
             "include_null": include_null,
             "control_mode": self.control_mode,
             "cloud_enabled": not self.local_only,
+            "capability_hygiene": getattr(self.device.status, "capability_hygiene", {}),
             "local": {
                 "available": self.local_available,
                 "last_error": self.local_last_error,

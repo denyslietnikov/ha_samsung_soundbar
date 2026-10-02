@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.exceptions import HomeAssistantError
 from pysmartthings import DeviceEvent, Status
 from pysmartthings.exceptions import SmartThingsCommandError
-
 
 _INPUT_SOURCE_COMMAND_VALUE_MAP = {
     "BT": "bluetooth",
@@ -25,14 +25,91 @@ class SmartThingsStatusCompat:
         self._device = device
         self._components: dict[str, Any] = {}
         self._attributes: dict[str, Any] = {}
+        self._disabled_components: set[str] = set()
+        self._disabled_capabilities: dict[str, set[str]] = {}
+        self._known_capabilities: dict[str, set[str]] = {}
 
     async def refresh(self) -> None:
         """Refresh device status from SmartThings."""
-        self._components = await self._api.get_device_status(self._device.device_id)
+        components = await self._api.get_device_status(self._device.device_id)
+        self._components = self._filter_status(components)
         self._attributes = self._flatten_attributes()
+
+    def _disabled_list(self, status: dict[Any, Any], capability: str, attribute: str):
+        for key, attributes in status.items():
+            if self._key_name(key) != capability:
+                continue
+            for key, item in attributes.items():
+                if self._key_name(key) == attribute:
+                    value = (
+                        item.get("value")
+                        if isinstance(item, dict)
+                        else getattr(item, "value", None)
+                    )
+                    if isinstance(value, list) and all(
+                        isinstance(value, str) for value in value
+                    ):
+                        return {self._key_name(value) for value in value}
+        return None
+
+    def _filter_status(self, components: dict[str, Any]) -> dict[str, Any]:
+        # Missing/null optional metadata is not evidence that a feature changed.
+        disabled = self._disabled_list(
+            components.get("main", {}),
+            "custom.disabledComponents",
+            "disabledComponents",
+        )
+        if disabled is not None:
+            self._disabled_components = disabled
+        for component, status in components.items():
+            disabled = self._disabled_list(
+                status, "custom.disabledCapabilities", "disabledCapabilities"
+            )
+            if disabled is not None:
+                self._disabled_capabilities[component] = disabled
+            self._known_capabilities.setdefault(component, set()).update(
+                self._key_name(key) for key in status
+            )
+        return {
+            component: {
+                key: value
+                for key, value in status.items()
+                if not self.is_disabled(self._key_name(key), component)
+            }
+            for component, status in components.items()
+            if component not in self._disabled_components
+        }
+
+    def is_disabled(self, capability: str, component: str = "main") -> bool:
+        """Return only explicit exclusions; absent capabilities are not disabled."""
+        return (
+            component in self._disabled_components
+            or capability in self._disabled_capabilities.get(component, set())
+        )
+
+    def is_component_disabled(self, component: str) -> bool:
+        return component in self._disabled_components
+
+    @property
+    def capability_hygiene(self) -> dict[str, Any]:
+        return {
+            "disabled_components": sorted(self._disabled_components),
+            "disabled_capabilities": {
+                component: sorted(values)
+                for component, values in self._disabled_capabilities.items()
+            },
+        }
 
     def apply_event(self, event: DeviceEvent) -> None:
         """Apply a SmartThings capability event to the cached status."""
+        metadata = self._key_name(event.capability) in (
+            "custom.disabledComponents",
+            "custom.disabledCapabilities",
+        )
+        if not metadata and self.is_disabled(
+            self._key_name(event.capability), event.component_id
+        ):
+            return
         component = self._components.setdefault(event.component_id, {})
         capability_key = self._matching_key(component, event.capability)
         capability = component.setdefault(capability_key, {})
@@ -43,6 +120,11 @@ class SmartThingsStatusCompat:
         else:
             current_status.value = event.value
             current_status.data = event.data
+        if metadata:
+            self._components = self._filter_status(self._components)
+        self._known_capabilities.setdefault(event.component_id, set()).add(
+            self._key_name(event.capability)
+        )
         self._attributes = self._flatten_attributes()
 
     @classmethod
@@ -81,9 +163,7 @@ class SmartThingsStatusCompat:
                     return status
         return None
 
-    def _value(
-        self, capability: str, attribute: str, default: Any = None
-    ) -> Any:
+    def _value(self, capability: str, attribute: str, default: Any = None) -> Any:
         """Return a SmartThings status value."""
         status = self._status(capability, attribute)
         return default if status is None else status.value
@@ -100,7 +180,10 @@ class SmartThingsStatusCompat:
     def has_capability(self, capability: str, component: str = "main") -> bool:
         """Return whether a capability exists in the last refreshed status."""
         capabilities = self._components.get(component, {})
-        return any(self._key_name(key) == capability for key in capabilities)
+        return not self.is_disabled(capability, component) and (
+            capability in self._known_capabilities.get(component, set())
+            or any(self._key_name(key) == capability for key in capabilities)
+        )
 
     def _first_value(
         self,
@@ -252,6 +335,10 @@ class SmartThingsDeviceCompat:
         argument: Any | None = None,
     ) -> bool:
         """Execute a SmartThings command."""
+        if self.status.is_disabled(capability, component):
+            raise HomeAssistantError(
+                f"SmartThings explicitly disabled {component}/{capability}"
+            )
         await self._api.execute_device_command(
             self.device_id,
             capability,

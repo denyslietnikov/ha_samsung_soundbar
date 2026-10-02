@@ -538,6 +538,26 @@ def _async_create_dump_local_rpc_service(hass: HomeAssistant):
         if write_method is not None and not isinstance(write_params, dict):
             raise HomeAssistantError("write_params must be an object")
 
+        verification = None
+        if write_method == "volumeControl":
+            value = write_params.get("volume")
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= 100
+            ):
+                raise HomeAssistantError(
+                    "volumeControl requires an integer volume in range 0-100"
+                )
+            verification = ("getVolume", "volume", value)
+        elif write_method == "muteControl":
+            value = write_params.get("mute")
+            if not isinstance(value, bool):
+                raise HomeAssistantError("muteControl requires a boolean mute value")
+            verification = ("getMute", "mute", value)
+        if verification is not None:
+            methods = tuple(dict.fromkeys((*methods, verification[0])))
+
         session = async_get_clientsession(hass, verify_ssl=verify_ssl)
         client = LocalSoundbarRpcClient(
             host,
@@ -560,9 +580,12 @@ def _async_create_dump_local_rpc_service(hass: HomeAssistant):
             "token_length": None,
             "results": results,
             "errors": errors,
+            "error_codes": {},
             "write_probe": None,
             "write_result": None,
             "write_error": None,
+            "write_error_code": None,
+            "write_verification": None,
             "post_write_results": post_write_results,
             "post_write_errors": post_write_errors,
         }
@@ -581,6 +604,7 @@ def _async_create_dump_local_rpc_service(hass: HomeAssistant):
                 results[method] = await client.call(method)
             except LocalRpcError as err:
                 errors[method] = str(err)
+                result["error_codes"][method] = err.code
 
         if write_method is not None:
             result["write_probe"] = {
@@ -591,12 +615,37 @@ def _async_create_dump_local_rpc_service(hass: HomeAssistant):
                 result["write_result"] = await client.call(write_method, write_params)
             except LocalRpcError as err:
                 result["write_error"] = str(err)
+                result["write_error_code"] = err.code
 
             for method in methods:
                 try:
                     post_write_results[method] = await client.call(method)
                 except LocalRpcError as err:
                     post_write_errors[method] = str(err)
+
+            if verification is not None:
+                method, field, requested = verification
+                parse = client.parse_volume if field == "volume" else client.parse_mute
+                readbacks = []
+                for values in (results, post_write_results):
+                    try:
+                        readbacks.append(parse(values.get(method, {}).get(field)))
+                    except LocalRpcError:
+                        readbacks.append(None)
+                before, after = readbacks
+                result["write_verification"] = {
+                    "field": field,
+                    "requested": requested,
+                    "before": before,
+                    "after": after,
+                    "readback_matches": result["write_error"] is None
+                    and after is not None
+                    and after == requested,
+                    "state_change_observed": before is not None
+                    and after is not None
+                    and before != after,
+                    "runtime_enabled": False,
+                }
 
         return result
 

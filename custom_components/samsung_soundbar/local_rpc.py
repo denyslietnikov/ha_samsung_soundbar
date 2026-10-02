@@ -31,6 +31,10 @@ LOCAL_SOUND_MODE_VALUES = (
 class LocalRpcError(Exception):
     """Raised when the local soundbar JSON-RPC API fails."""
 
+    def __init__(self, message: str, *, code: int | None = None):
+        super().__init__(message)
+        self.code = code
+
 
 class LocalRpcAuthError(LocalRpcError):
     """Raised when the local soundbar rejects the access token."""
@@ -42,6 +46,10 @@ class LocalRpcCommandError(LocalRpcError):
 
 class LocalRpcMethodNotFoundError(LocalRpcCommandError):
     """Raised for the JSON-RPC method-not-found response (-32601)."""
+
+
+class LocalRpcParseError(LocalRpcCommandError):
+    """Parse error is not proof of rejected authentication on every model."""
 
 
 class LocalSoundbarRpcClient:
@@ -65,6 +73,8 @@ class LocalSoundbarRpcClient:
         self._call_lock = asyncio.Lock()
         self._volume_lock = asyncio.Lock()
         self._request_id = 0
+        self._identifier: str | None = None
+        self._identifier_confirmations = 0
 
     @property
     def token_length(self) -> int | None:
@@ -104,14 +114,24 @@ class LocalSoundbarRpcClient:
         if not isinstance(data, dict):
             raise LocalRpcError(f"unexpected response type: {type(data).__name__}")
 
-        if "error" in data:
-            error = data["error"]
+        if "error" in data or ("result" not in data and "code" in data):
+            error = data.get("error", data)
             message = self._sanitize_error(self._format_error(error), payload)
-            if isinstance(error, dict) and str(error.get("code")) == "-32601":
-                raise LocalRpcMethodNotFoundError(message)
+            code = error.get("code") if isinstance(error, dict) else None
+            try:
+                code = int(code) if code is not None else None
+            except (ValueError, TypeError):
+                code = None
+            if code == -32601:
+                raise LocalRpcMethodNotFoundError(message, code=code)
+            if code == -32700:
+                raise LocalRpcParseError(message, code=code)
             if "token" in message.lower() or "auth" in message.lower():
-                raise LocalRpcAuthError(message)
-            raise LocalRpcCommandError(message)
+                raise LocalRpcAuthError(message, code=code)
+            raise LocalRpcCommandError(message, code=code)
+
+        if "result" not in data:
+            raise LocalRpcError("response has neither result nor a JSON-RPC error")
 
         result = data.get("result")
         if isinstance(result, dict):
@@ -285,6 +305,10 @@ class LocalSoundbarRpcClient:
 
     async def _read_volume(self) -> int:
         value = (await self.call("getVolume")).get("volume")
+        return self.parse_volume(value)
+
+    @staticmethod
+    def parse_volume(value: Any) -> int:
         if isinstance(value, bool) or not isinstance(value, (int, str)):
             raise LocalRpcError("getVolume did not return a valid volume")
         try:
@@ -297,6 +321,10 @@ class LocalSoundbarRpcClient:
 
     async def is_muted(self) -> bool:
         value = (await self.call("getMute")).get("mute")
+        return self.parse_mute(value)
+
+    @staticmethod
+    def parse_mute(value: Any) -> bool:
         if isinstance(value, bool):
             return value
         if isinstance(value, int) and value in (0, 1):
@@ -317,9 +345,18 @@ class LocalSoundbarRpcClient:
         value = (await self.call("getCodec")).get("codec")
         return str(value) if value is not None else None
 
-    async def identifier(self) -> str | None:
+    async def identifier(self, *, use_cache: bool = False) -> str | None:
+        if use_cache and self._identifier_confirmations >= 2:
+            return self._identifier
         value = (await self.call("getIdentifier")).get("identifier")
-        return str(value) if value is not None else None
+        if not isinstance(value, str) or not value.strip():
+            self._identifier_confirmations = 0
+            return None
+        self._identifier_confirmations = (
+            self._identifier_confirmations + 1 if value == self._identifier else 1
+        )
+        self._identifier = value
+        return value
 
     async def status(self) -> dict[str, Any]:
         values = await asyncio.gather(
@@ -329,7 +366,7 @@ class LocalSoundbarRpcClient:
             self.input_source(),
             self.sound_mode(),
             self.codec(),
-            self.identifier(),
+            self.identifier(use_cache=True),
             return_exceptions=True,
         )
         keys = (

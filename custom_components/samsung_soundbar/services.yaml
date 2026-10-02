@@ -368,7 +368,7 @@ dump_local_rpc:
             - createAccessToken
     write_method:
       name: Write probe method
-      description: Optional local JSON-RPC method to call with write_params after read methods. The service reads the same methods again after this call. This may change the soundbar setting.
+      description: Optional local JSON-RPC method to call with write_params after read methods. Direct volumeControl (integer volume 0-100) and muteControl (boolean mute) probes include actual getter readback and do not enable these methods in runtime. This may change the soundbar setting.
       required: false
       example: inputSelectControl
       selector:

@@ -25,7 +25,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 entities.append(
                     InputSourceSensor(device, "input_preset", "mdi:video-input-hdmi")
                 )
-            if device.local_only or device.has_status_capability("samsungvd.soundFrom"):
+            if (
+                device.hybrid_mode
+                or device.has_status_capability("samsungvd.soundFrom")
+                or device.has_status_capability("samsungvd.audioSoundFrom")
+            ):
                 entities.append(SoundFromSensor(device, "sound_from", "mdi:speaker"))
             register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
@@ -33,6 +37,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 
 class VolumeSensor(SensorEntity):
+    _soundbar_cloud_capabilities = ("audioVolume",)
+
     def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
@@ -56,6 +62,8 @@ class VolumeSensor(SensorEntity):
 
 
 class InputSourceSensor(SensorEntity):
+    _soundbar_cloud_capabilities = ("mediaInputSource", "samsungvd.audioInputSource")
+
     def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sensor_{append_unique_id}"
@@ -79,6 +87,8 @@ class InputSourceSensor(SensorEntity):
 
 
 class SoundFromSensor(SensorEntity):
+    _soundbar_cloud_capabilities = ("samsungvd.soundFrom", "samsungvd.audioSoundFrom")
+
     def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sensor_{append_unique_id}"

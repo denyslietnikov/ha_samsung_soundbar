@@ -75,6 +75,13 @@ class TestFieldState(TestCase):
         self.assertIsNone(self.state.value("sound_from_detail_name"))
         self.assertEqual(self.state.value("input_source"), "WIFI")
 
+    def test_static_model_identifier_does_not_expire_with_core_status(self):
+        self.state.merge("local", {"local_identifier": "22_AV_HW-Q800F", "power": "on"})
+        self.now = 200
+        self.assertEqual(self.state.value("local_identifier"), "22_AV_HW-Q800F")
+        self.assertIsNone(self.state.value("power"))
+        self.assertIsNone(self.state.diagnostics()["local_identifier"]["ttl_seconds"])
+
     def test_write_guard_filters_pre_write_and_stale_readback(self):
         self.state.merge("local", {"sound_mode": "Standard"})
         self.now = 2

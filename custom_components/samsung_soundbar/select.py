@@ -62,6 +62,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 class EqPresetSelectEntity(SelectEntity):
     _soundbar_cloud_only = True
+    _soundbar_cloud_capabilities = ("execute",)
 
     def __init__(
         self,
@@ -109,6 +110,7 @@ class EqPresetSelectEntity(SelectEntity):
 
 
 class SoundModeSelectEntity(SelectEntity, RestoreEntity):
+    _soundbar_cloud_capabilities = ("execute",)
     def __init__(
         self,
         device: SoundbarDevice,
@@ -171,6 +173,7 @@ class SoundModeSelectEntity(SelectEntity, RestoreEntity):
 
 
 class InputSelectEntity(SelectEntity, RestoreEntity):
+    _soundbar_cloud_capabilities = ("mediaInputSource", "samsungvd.audioInputSource")
     def __init__(
         self,
         device: SoundbarDevice,

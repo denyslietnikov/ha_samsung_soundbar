@@ -151,6 +151,37 @@ pending writes. It also works in Local-only without issuing SmartThings requests
 cloud-only diagnostic sections are omitted in that mode. Advanced Audio switches
 remain optimistic when the device does not provide readable cloud state.
 
+Cloud status respects explicit `custom.disabledComponents` and
+`custom.disabledCapabilities` lists. Missing/null optional metadata does not
+disable existing features. Disabled Cloud features do not disable LAN controls
+in Hybrid; their Cloud commands are blocked and existing controls become
+unavailable rather than deleting entity-registry entries.
+
+Direct-control candidates can be tested explicitly, for example:
+
+```yaml
+action: samsung_soundbar.dump_local_rpc
+data:
+  host: 192.168.0.10
+  write_method: volumeControl
+  write_params:
+    volume: 8
+```
+
+This changes the volume to the requested integer (0-100). For a mute probe use
+`write_method: muteControl` and `write_params: {mute: true}` (a boolean).
+The service automatically includes `getVolume`/`getMute` before and after
+the write and returns `write_verification` with `readback_matches` and
+`state_change_observed`. Matching an unchanged value does not prove that the
+write changed anything. These candidates are **not enabled in runtime**;
+verified Q800F read/write/readback is required before adopting a model profile.
+
+Bare JSON-RPC errors are reported with their code, including `-32700`. A parse
+error alone is not treated as authentication rejection or automatically retried
+as a write. Explicit token rejection still gets one authentication retry.
+The model-only `getIdentifier` is cached in memory after two matching reads;
+explicit diagnostic calls still read it directly. It is never a device identity.
+
 ## Limitations
 
 - The SmartThings mobile app can use private Samsung APIs that are not

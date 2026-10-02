@@ -72,7 +72,9 @@ class SoundbarState:
             if previous is not None and previous.observed_at > now:
                 continue
             ttl = (
-                STREAMING_TTL
+                None
+                if source == "local" and key == "local_identifier"
+                else STREAMING_TTL
                 if key == "sound_from_detail_name"
                 else (LOCAL_TTL if source == "local" else CLOUD_TTL)
             )
@@ -99,6 +101,14 @@ class SoundbarState:
             self.pending[key] = FieldValue(value, "optimistic", now, WRITE_SETTLE_TIME)
             if write_only:
                 self.write_only[key] = FieldValue(value, "optimistic", now, None)
+
+    def discard_cloud_fields(self, fields: set[str]):
+        """Remove explicitly disabled Cloud state without discarding LAN writes."""
+        for key in fields:
+            self.records["cloud"].pop(key, None)
+            if not (self.use_local and key in LOCAL_FIELDS):
+                self.pending.pop(key, None)
+                self.write_only.pop(key, None)
 
     def resolve(self, key: str) -> FieldValue | None:
         now = self.clock()

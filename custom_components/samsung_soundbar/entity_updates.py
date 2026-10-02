@@ -21,6 +21,15 @@ def register_device_update_listener(
     coordinator = device.coordinator
 
     def available_for(entity):
+        capabilities = getattr(entity, "_soundbar_cloud_capabilities", ())
+        if (
+            capabilities
+            and (
+                getattr(entity, "_soundbar_cloud_only", False) or not device.hybrid_mode
+            )
+            and device.cloud_feature_disabled(*capabilities)
+        ):
+            return False
         if coordinator is not None and getattr(entity, "_soundbar_cloud_only", False):
             return coordinator.state.snapshot().cloud_available
         return device.available

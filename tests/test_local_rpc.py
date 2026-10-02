@@ -16,6 +16,8 @@ from custom_components.samsung_soundbar.local_rpc import (
     LocalRpcAuthError,
     LocalRpcCommandError,
     LocalRpcError,
+    LocalRpcMethodNotFoundError,
+    LocalRpcParseError,
     LocalSoundbarRpcClient,
 )
 
@@ -125,6 +127,73 @@ class TestLocalRpc(IsolatedAsyncioTestCase):
         await self.rpc.set_volume(11)
         self.assertEqual(await self.rpc.volume(), 11)
         self.assertNotIn("remoteKeyControl", self.soundbar.methods)
+
+    async def test_bare_and_enveloped_errors_are_not_success_or_unbounded_auth_retry(
+        self,
+    ):
+        self.rpc._token = "private-local-token"
+        for wrapped in (True, False):
+            for code, kind in (
+                (-32700, LocalRpcParseError),
+                (-32601, LocalRpcMethodNotFoundError),
+                (-32602, LocalRpcCommandError),
+            ):
+                with self.subTest(wrapped=wrapped, code=code):
+
+                    async def respond(payload, code=code, wrapped=wrapped):
+                        error = {
+                            "code": code,
+                            "message": "Rejected private-local-token",
+                        }
+                        return {"error": error} if wrapped else error
+
+                    self.soundbar.handler = respond
+                    with self.assertRaises(kind) as caught:
+                        await self.rpc.call("volumeControl", {"volume": 10})
+                    self.assertEqual(caught.exception.code, code)
+                    self.assertNotIn("private-local-token", str(caught.exception))
+        self.assertEqual(len(self.soundbar.requests), 6)
+        self.assertNotIn("createAccessToken", self.soundbar.methods)
+
+    async def test_missing_result_is_not_reported_as_success(self):
+        self.rpc._token = "private-local-token"
+
+        async def respond(payload):
+            return {"jsonrpc": "2.0", "id": payload["id"]}
+
+        self.soundbar.handler = respond
+        with self.assertRaisesRegex(LocalRpcError, "neither result"):
+            await self.rpc.call("powerControl")
+
+    async def test_identifier_cached_only_after_two_matching_reads(self):
+        for _ in range(4):
+            self.assertEqual((await self.rpc.status())["identifier"], "22_AV_HW-Q800F")
+        self.assertEqual(self.soundbar.methods.count("getIdentifier"), 2)
+        await self.rpc.identifier()
+        self.assertEqual(self.soundbar.methods.count("getIdentifier"), 3)
+        fresh_client = LocalSoundbarRpcClient("192.0.2.26", self.soundbar.session)
+        await fresh_client.status()
+        self.assertEqual(self.soundbar.methods.count("getIdentifier"), 4)
+
+    async def test_identifier_change_requires_matching_confirmation(self):
+        original = self.soundbar.respond
+        identifiers = iter(("old", "new", "new"))
+
+        async def respond(payload):
+            if payload["method"] == "getIdentifier":
+                return {"result": {"identifier": next(identifiers)}}
+            return await original(payload)
+
+        self.soundbar.handler = respond
+        values = [(await self.rpc.status())["identifier"] for _ in range(4)]
+        self.assertEqual(values, ["old", "new", "new", "new"])
+        self.assertEqual(self.soundbar.methods.count("getIdentifier"), 3)
+
+    async def test_direct_control_candidates_are_never_selected_by_runtime(self):
+        await self.rpc.set_volume(8)
+        await self.rpc.mute_toggle()
+        self.assertNotIn("volumeControl", self.soundbar.methods)
+        self.assertNotIn("muteControl", self.soundbar.methods)
 
     async def test_relative_volume_reads_every_step_including_dropped_commands(self):
         self.soundbar.steps = [0, 2, 0, 1]
