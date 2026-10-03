@@ -13,7 +13,8 @@ class LocalIdentityError(Exception):
     """No usable local identity could be read."""
 
 
-def _normalize_mac(value: object) -> str | None:
+def normalize_mac(value: object) -> str | None:
+    """Normalize both local metadata and DHCP MAC formats."""
     if not isinstance(value, str):
         return None
     compact = re.sub(r"[:-]", "", value).lower()
@@ -46,7 +47,7 @@ async def async_read_local_identity(
             payload = await response.json()
         device = payload.get("device") if isinstance(payload, dict) else None
         if isinstance(device, dict):
-            if mac := _normalize_mac(device.get("wifiMac")):
+            if mac := normalize_mac(device.get("wifiMac")):
                 identity["wifi_mac"] = mac
             if duid := _normalize_uuid(device.get("duid")):
                 identity["tizen_duid"] = duid

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import pysmartthings
@@ -18,6 +18,7 @@ from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.config_entry_oauth2_flow import AbstractOAuth2FlowHandler
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pysmartthings.exceptions import (
     SmartThingsAuthenticationFailedError,
     SmartThingsConnectionError,
@@ -25,36 +26,41 @@ from pysmartthings.exceptions import (
 )
 
 from .const import (
-    CONF_CONTROL_MODE,
-    CONF_ENTRY_DEVICE_ID,
-    CONF_ENTRY_API_KEY,
     CONF_CLOUD_INTEGRATION,
-    CONF_ENTRY_MAX_VOLUME,
+    CONF_CONTROL_MODE,
+    CONF_ENTRY_API_KEY,
+    CONF_ENTRY_DEVICE_ID,
     CONF_ENTRY_DEVICE_NAME,
+    CONF_ENTRY_MAX_VOLUME,
     CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
     CONF_ENTRY_SETTINGS_EQ_SELECTOR,
     CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
     CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
-    CONF_LOCATION_ID,
     CONF_INSTALLED_APP_ID,
-    CONF_SUBSCRIPTION_ID,
     CONF_LOCAL_FALLBACK_TO_CLOUD,
     CONF_LOCAL_HOST,
     CONF_LOCAL_IDENTITY,
     CONF_LOCAL_PORT,
     CONF_LOCAL_TIMEOUT,
     CONF_LOCAL_VERIFY_SSL,
-    CONTROL_MODE_LABELS,
+    CONF_LOCATION_ID,
+    CONF_SUBSCRIPTION_ID,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+    CONTROL_MODE_LABELS,
     CONTROL_MODE_LOCAL_ONLY,
     CONTROL_MODE_SMARTTHINGS_CLOUD,
     DOMAIN,
     SMARTTHINGS_OAUTH_SCOPES,
     SMARTTHINGS_REQUIRED_SCOPES,
 )
+from .dhcp_recovery import async_recover_dhcp_host
 from .entry_options import DEFAULT_ENTRY_OPTIONS, get_entry_option, get_entry_options
+from .local_identity import (
+    LocalIdentityError,
+    async_read_local_identity,
+    identities_match,
+)
 from .local_rpc import LocalRpcError, LocalSoundbarRpcClient
-from .local_identity import LocalIdentityError, async_read_local_identity, identities_match
 from .subscription import async_remove_subscription
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,6 +97,14 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
     def extra_authorize_data(self) -> dict[str, Any]:
         """Extra authorization data for SmartThings."""
         return {"scope": " ".join(SMARTTHINGS_OAUTH_SCOPES)}
+
+    async def async_step_dhcp(
+        self, discovery_info: DhcpServiceInfo
+    ) -> ConfigFlowResult:
+        """Recover existing local entries; never start OAuth or create an entry."""
+        return self.async_abort(
+            reason=await async_recover_dhcp_host(self.hass, discovery_info)
+        )
 
     async def async_oauth_create_entry(
         self,
@@ -398,6 +412,13 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
         if user_input is not None:
             options = get_entry_options(self.config_entry)
             options.update(user_input)
+            saved = self.config_entry.options.get(
+                CONF_LOCAL_IDENTITY
+            ) or self.config_entry.data.get(CONF_LOCAL_IDENTITY)
+            if isinstance(saved, dict):
+                options[CONF_LOCAL_IDENTITY] = dict(saved)
+            else:
+                saved = None
 
             if options[CONF_CONTROL_MODE] in (
                 CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
@@ -419,18 +440,34 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                         )
                         errors["base"] = "cannot_connect"
 
-            if not errors and options[CONF_CONTROL_MODE] == CONTROL_MODE_LOCAL_ONLY:
+            if not errors and options[CONF_CONTROL_MODE] in (
+                CONTROL_MODE_LOCAL_ONLY,
+                CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+            ):
                 try:
                     identity = await self._async_read_identity(options)
                 except LocalIdentityError:
-                    errors["base"] = "identity_unavailable"
+                    host_changed = (
+                        options[CONF_LOCAL_HOST]
+                        != str(
+                            get_entry_option(self.config_entry, CONF_LOCAL_HOST)
+                        ).strip()
+                    )
+                    if options[CONF_CONTROL_MODE] == CONTROL_MODE_LOCAL_ONLY or (
+                        saved and host_changed
+                    ):
+                        errors["base"] = "identity_unavailable"
+                    else:
+                        _LOGGER.debug(
+                            "Hybrid identity unavailable; retaining existing binding"
+                        )
                 else:
-                    saved = self.config_entry.options.get(
-                        CONF_LOCAL_IDENTITY
-                    ) or self.config_entry.data.get(CONF_LOCAL_IDENTITY)
                     if saved and not identities_match(saved, identity):
                         errors["base"] = "identity_mismatch"
-                    elif not saved:
+                    elif (
+                        not saved
+                        and options[CONF_CONTROL_MODE] == CONTROL_MODE_LOCAL_ONLY
+                    ):
                         self._pending_options = options
                         self._pending_identity = identity
                         return self.async_show_form(
@@ -441,7 +478,7 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                             },
                         )
                     else:
-                        options[CONF_LOCAL_IDENTITY] = identity
+                        options[CONF_LOCAL_IDENTITY] = {**(saved or {}), **identity}
 
             if not errors:
                 return await self._async_save_options(options)
@@ -473,7 +510,7 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                 if not identities_match(expected, observed):
                     errors["base"] = "identity_mismatch"
                 else:
-                    options[CONF_LOCAL_IDENTITY] = observed
+                    options[CONF_LOCAL_IDENTITY] = {**expected, **observed}
                     return await self._async_save_options(options)
         return self.async_show_form(
             step_id="confirm_local_identity",

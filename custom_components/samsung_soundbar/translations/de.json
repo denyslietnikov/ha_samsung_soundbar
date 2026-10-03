@@ -51,6 +51,11 @@
             "identity_unavailable": "Keine stabile lokale Gerätekennung auf Port 8001 oder 9110 gefunden."
         },
         "abort":{
+            "dhcp_not_configured": "Kein konfigurierter lokaler Soundbar passt zu diesem DHCP-Gerät.",
+            "dhcp_host_updated": "Die lokale Adresse wurde geprüft und für den vorhandenen Soundbar aktualisiert.",
+            "dhcp_identity_unavailable": "Die lokale Adresse wurde nicht geändert, da die Gerätekennung nicht geprüft werden konnte.",
+            "dhcp_identity_mismatch": "Die gefundene Adresse gehört zu einem anderen Gerät. Die Einstellungen wurden nicht geändert.",
+            "dhcp_configuration_changed": "Die Soundbar-Konfiguration wurde während der Erkennung geändert. Die Adresse wurde nicht aktualisiert.",
             "cannot_connect": "Verbindung zu SmartThings fehlgeschlagen. Bitte später erneut versuchen.",
             "invalid_auth": "SmartThings Authentifizierung fehlgeschlagen.",
             "missing_configuration": "SmartThings Application Credentials sind nicht konfiguriert.",

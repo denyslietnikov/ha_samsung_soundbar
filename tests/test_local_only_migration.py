@@ -18,9 +18,9 @@ from custom_components.samsung_soundbar.const import (
     CONF_SUBSCRIPTION_ID,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
     CONTROL_MODE_LOCAL_ONLY,
+    CONTROL_MODE_SMARTTHINGS_CLOUD,
 )
 from custom_components.samsung_soundbar.local_identity import LocalIdentityError
-
 
 IDENTITY = {"wifi_mac": "94:e6:ba:89:bd:ba", "tizen_duid": "uuid:f289154e-3c4a-41d8-ba8f-86850cf9be07"}
 
@@ -149,3 +149,58 @@ class TestLocalOnlyMigration(IsolatedAsyncioTestCase):
             await self.flow.async_step_init({CONF_CONTROL_MODE: CONTROL_MODE_LOCAL_ONLY})
             await self.flow.async_step_confirm_local_identity({})
         remove.assert_awaited_once_with(self.entry, subscription)
+
+    async def test_legacy_hybrid_options_bind_identity_for_dhcp_without_losing_oauth(self) -> None:
+        original_data = dict(self.entry.data)
+        result = await self.flow.async_step_init({CONF_LOCAL_HOST: "192.0.2.26"})
+        self.assertEqual(result["data"][CONF_LOCAL_IDENTITY], IDENTITY)
+        self.assertEqual(
+            result["data"][CONF_CONTROL_MODE], CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
+        )
+        self.assertEqual(self.entry.data, original_data)
+        self.hass.config_entries.async_update_entry.assert_not_called()
+
+    async def test_hybrid_identity_mismatch_blocks_manual_host_change(self) -> None:
+        self.entry.options[CONF_LOCAL_IDENTITY] = IDENTITY
+        self.read_identity.return_value = {"wifi_mac": "94:e6:ba:89:bd:bb"}
+        result = await self.flow.async_step_init({CONF_LOCAL_HOST: "192.0.2.27"})
+        self.assertEqual(result["errors"], {"base": "identity_mismatch"})
+        self.flow.async_create_entry.assert_not_called()
+
+    async def test_hybrid_missing_endpoint_does_not_break_same_host_options(
+        self,
+    ) -> None:
+        self.read_identity.side_effect = LocalIdentityError("metadata unavailable")
+        for saved in (None, IDENTITY):
+            with self.subTest(identity=saved):
+                if saved:
+                    self.entry.options[CONF_LOCAL_IDENTITY] = saved
+                result = await self.flow.async_step_init(
+                    {CONF_LOCAL_HOST: "192.0.2.26"}
+                )
+                if saved:
+                    self.assertEqual(result["data"][CONF_LOCAL_IDENTITY], saved)
+                else:
+                    self.assertNotIn(CONF_LOCAL_IDENTITY, result["data"])
+        self.assertIn(CONF_TOKEN, self.entry.data)
+
+    async def test_hybrid_bound_host_change_requires_readable_identity(self) -> None:
+        self.entry.options[CONF_LOCAL_IDENTITY] = IDENTITY
+        self.read_identity.side_effect = LocalIdentityError("metadata unavailable")
+        result = await self.flow.async_step_init({CONF_LOCAL_HOST: "192.0.2.27"})
+        self.assertEqual(result["errors"], {"base": "identity_unavailable"})
+        self.flow.async_create_entry.assert_not_called()
+
+    async def test_partial_options_read_preserves_dhcp_mac_binding(self) -> None:
+        self.entry.options[CONF_LOCAL_IDENTITY] = IDENTITY
+        self.read_identity.return_value = {"tizen_duid": IDENTITY["tizen_duid"]}
+        result = await self.flow.async_step_init({CONF_LOCAL_HOST: "192.0.2.27"})
+        self.assertEqual(result["data"][CONF_LOCAL_IDENTITY], IDENTITY)
+
+    async def test_cloud_options_keep_identity_for_later_hybrid_recovery(self) -> None:
+        self.entry.options[CONF_LOCAL_IDENTITY] = IDENTITY
+        result = await self.flow.async_step_init(
+            {CONF_CONTROL_MODE: CONTROL_MODE_SMARTTHINGS_CLOUD}
+        )
+        self.assertEqual(result["data"][CONF_LOCAL_IDENTITY], IDENTITY)
+        self.read_identity.assert_not_awaited()

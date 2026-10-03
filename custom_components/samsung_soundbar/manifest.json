@@ -5,6 +5,11 @@
     "@samuelspagl"
   ],
   "config_flow": true,
+  "dhcp": [
+    {"macaddress": "94E6BA*"},
+    {"hostname": "tizen*"},
+    {"hostname": "soundbar*"}
+  ],
   "documentation": "https://www.example.com",
   "integration_type": "hub",
   "iot_class": "cloud_polling",

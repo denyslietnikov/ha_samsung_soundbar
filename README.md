@@ -31,13 +31,15 @@ operation with recent Home Assistant releases and Samsung HW-Q800F.
 | --- | --- | --- | --- | --- |
 | SmartThings Cloud | Available | Required | Public SmartThings capabilities | Source and sound-mode write support depends on the device profile. |
 | Hybrid Local + SmartThings Cloud | Available | Required | Local JSON-RPC for media controls; SmartThings for setup, fallback and cloud-only features | Recommended for Q800F. |
-| Local only | Available for existing entries | Required only for the initial entry creation | Local JSON-RPC only | Select in Options after the soundbar has been added; no SmartThings requests during setup, reload or operation in this mode. |
+| Local only | Available | Not required | Local JSON-RPC only | Select during initial setup or in Options; no SmartThings requests during setup, reload or operation in this mode. |
 
 An existing entry can switch to **Local only** in Options after configuring a
-working local host. Its existing device and entity IDs are retained. OAuth-free
-first-time setup and removal of stored OAuth credentials are not implemented
-yet; do not delete the entry to switch modes. Cloud-only switches and artwork
-are not available in Local-only mode.
+working local host. Its existing device and entity IDs are retained. New
+Local-only entries skip OAuth. Switching an existing entry to Local-only
+requires local identity confirmation and removes its stored OAuth credentials;
+returning to a cloud mode requires authorization again. Do not delete the entry
+to switch modes. Cloud-only switches and artwork are not available in Local-only
+mode.
 
 ## Installation
 
@@ -104,6 +106,28 @@ SmartThings OAuth token and is not stored in the Home Assistant configuration.
 For Q800F, Hybrid mode is the recommended currently available mode. It gives
 reliable local readback for `Input Preset`, `Sound Mode`, volume, mute and
 streaming source labels such as AirPlay, Google Cast and Roon.
+
+### DHCP Address Recovery
+
+Local-only and Hybrid entries can recover a changed IPv4 address when Home
+Assistant DHCP discovery sees the soundbar. Discovery matches the confirmed
+Q800F MAC prefix `94:E6:BA` or hostnames starting with `tizen` or `soundbar`.
+Only events matching an entry's saved `wifiMac` trigger a read-only identity
+check on ports `8001`/`9110`; unrelated devices are not probed.
+
+The new address is accepted only if a saved MAC/UUID matches the metadata and
+no shared identifier contradicts it. The existing entry reloads with the new
+host, retaining its device/entity IDs, history, OAuth credentials and other
+options. Partial metadata does not erase previously saved identifiers. DHCP
+discovery never creates an entry or merges devices through MAC connections.
+
+For older Hybrid entries, save Options once with the working local host to
+record its identity. If metadata is unavailable, Hybrid can keep working but
+automatic recovery needs a saved MAC. UUID-only entries, other MAC prefixes
+with unmatched hostnames, and networks where HA cannot observe DHCP discovery
+still need a manual host change in Options. Failed identity checks leave the
+old address unchanged; a later DHCP event can retry. A DHCP reservation remains
+recommended. Actual router/device address changes still need field-testing.
 
 ## Feature Availability
 
