@@ -8,7 +8,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_TOKEN, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -23,6 +22,7 @@ from .const import (
     CONF_SUBSCRIPTION_ID,
     SMARTTHINGS_REQUIRED_SCOPES,
 )
+from .models import SoundbarConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class SmartThingsSubscriptionRuntime:
 
 async def async_setup_subscription(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: SoundbarConfigEntry,
     client: SmartThings,
     device: SoundbarDevice,
 ) -> SmartThingsSubscriptionRuntime | None:
@@ -133,9 +133,7 @@ async def async_setup_subscription(
             err,
         )
     else:
-        device.handle_smartthings_availability(
-            health.state == HealthStatus.ONLINE
-        )
+        device.handle_smartthings_availability(health.state == HealthStatus.ONLINE)
 
     old_subscription_id = entry.data.get(CONF_SUBSCRIPTION_ID)
     if old_subscription_id is not None:
@@ -185,7 +183,7 @@ async def async_setup_subscription(
 
 
 async def async_remove_subscription(
-    entry: ConfigEntry,
+    entry: SoundbarConfigEntry,
     runtime: SmartThingsSubscriptionRuntime,
 ) -> None:
     """Remove the active SmartThings subscription during config-entry unload."""

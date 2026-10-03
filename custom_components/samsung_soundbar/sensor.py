@@ -2,38 +2,37 @@ import logging
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import PERCENTAGE
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api_extension.SoundbarDevice import SoundbarDevice
-from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
 from .device_info import build_device_info
 from .entity_updates import register_device_update_listener
-from .models import DeviceConfig
+from .models import SoundbarConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    domain_data = hass.data[DOMAIN]
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: SoundbarConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    device = config_entry.runtime_data.device
     entities = []
-    for key in domain_data.devices:
-        device_config: DeviceConfig = domain_data.devices[key]
-        device = device_config.device
-
-        if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
-            entities.append(VolumeSensor(device, "volume_level", "mdi:volume-high"))
-            if not device.can_select_source:
-                entities.append(
-                    InputSourceSensor(device, "input_preset", "mdi:video-input-hdmi")
-                )
-            if (
-                device.hybrid_mode
-                or device.has_status_capability("samsungvd.soundFrom")
-                or device.has_status_capability("samsungvd.audioSoundFrom")
-            ):
-                entities.append(SoundFromSensor(device, "sound_from", "mdi:speaker"))
-            register_device_update_listener(config_entry, device, entities)
+    entities.append(VolumeSensor(device, "volume_level", "mdi:volume-high"))
+    if not device.can_select_source:
+        entities.append(
+            InputSourceSensor(device, "input_preset", "mdi:video-input-hdmi")
+        )
+    if (
+        device.hybrid_mode
+        or device.has_status_capability("samsungvd.soundFrom")
+        or device.has_status_capability("samsungvd.audioSoundFrom")
+    ):
+        entities.append(SoundFromSensor(device, "sound_from", "mdi:speaker"))
+    register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
-    return True
 
 
 class VolumeSensor(SensorEntity):

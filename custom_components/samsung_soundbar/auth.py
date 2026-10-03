@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 
 from aiohttp import ClientError
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import (
@@ -23,6 +22,7 @@ from homeassistant.helpers.config_entry_oauth2_flow import (
 from pysmartthings import SmartThings
 
 from .cloud_errors import SmartThingsHttpSession, cloud_error_for_status
+from .models import SoundbarConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class SmartThingsAuthProvider:
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry,
+        entry: SoundbarConfigEntry,
         oauth_session: OAuth2Session | None,
         api: SmartThings,
     ) -> None:
@@ -48,7 +48,7 @@ class SmartThingsAuthProvider:
     async def async_create(
         cls,
         hass: HomeAssistant,
-        entry: ConfigEntry,
+        entry: SoundbarConfigEntry,
         *,
         defer_auth: bool = False,
     ) -> SmartThingsAuthProvider:
@@ -69,7 +69,11 @@ class SmartThingsAuthProvider:
                     implementation = await async_get_config_entry_implementation(
                         self.hass, self.entry
                     )
-                except (ImplementationUnavailableError, ValueError) as err:
+                except ImplementationUnavailableError as err:
+                    raise ConfigEntryNotReady(
+                        "SmartThings OAuth implementation is temporarily unavailable"
+                    ) from err
+                except ValueError as err:
                     raise ConfigEntryAuthFailed(
                         "SmartThings OAuth application credentials are unavailable"
                     ) from err

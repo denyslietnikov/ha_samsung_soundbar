@@ -264,7 +264,9 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             ): vol.All(vol.Coerce(float), vol.Range(min=1, max=60)),
         }
         if self._selected_control_mode == CONTROL_MODE_LOCAL_ONLY:
-            schema[vol.Required(CONF_ENTRY_DEVICE_NAME, default="Samsung Soundbar")] = str
+            schema[vol.Required(CONF_ENTRY_DEVICE_NAME, default="Samsung Soundbar")] = (
+                str
+            )
         return self.async_show_form(
             step_id="local", data_schema=vol.Schema(schema), errors=errors
         )
@@ -364,9 +366,7 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         await self.async_set_unique_id(device_id)
         self._abort_if_unique_id_mismatch(reason="reauth_account_mismatch")
 
-        device_name = entry.data.get(CONF_ENTRY_DEVICE_NAME) or self._devices[
-            device_id
-        ]
+        device_name = entry.data.get(CONF_ENTRY_DEVICE_NAME) or self._devices[device_id]
         preserved_local_data = {
             key: entry.data[key]
             for key in (
@@ -388,12 +388,25 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             CONF_LOCATION_ID: self._device_locations[device_id],
         }
 
-        return self.async_update_reload_and_abort(
+        runtime = getattr(entry, "runtime_data", None)
+        if runtime is not None:
+            runtime.reauth_pending = True
+        changed = (
+            entry.data != new_data
+            or entry.title != device_name
+            or entry.unique_id != device_id
+        )
+        result = self.async_update_and_abort(
             entry,
             data=new_data,
             title=device_name,
             unique_id=device_id,
         )
+        # Loaded entries reload through the listener, even for token-only reauth.
+        # Failed setup and unchanged credentials have no update to trigger it.
+        if not entry.update_listeners or not changed:
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        return result
 
 
 class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
@@ -541,12 +554,8 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
             options[CONF_CONTROL_MODE] == CONTROL_MODE_LOCAL_ONLY
             and cloud_keys & self.config_entry.data.keys()
         ):
-            runtime = self.hass.data.get(DOMAIN)
-            subscription = (
-                runtime.subscriptions.get(self.config_entry.entry_id)
-                if runtime is not None
-                else None
-            )
+            runtime = getattr(self.config_entry, "runtime_data", None)
+            subscription = runtime.subscription if runtime is not None else None
             if subscription is not None:
                 await async_remove_subscription(self.config_entry, subscription)
             new_data = {

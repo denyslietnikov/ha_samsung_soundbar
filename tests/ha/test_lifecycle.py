@@ -39,7 +39,7 @@ async def test_local_only_setup_reload_and_unload_preserve_ids(hass, entry, tran
     assert (
         len(dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)) == 1
     )
-    device = hass.data[DOMAIN].devices["existing-cloud-id"].device
+    device = entry.runtime_data.device
     old_coordinator = device.coordinator
 
     assert await hass.config_entries.async_reload(entry.entry_id)
@@ -61,7 +61,7 @@ async def test_local_lan_failure_and_recovery_update_real_entity_state(
 ):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    device = hass.data[DOMAIN].devices["existing-cloud-id"].device
+    device = entry.runtime_data.device
     player_id = next(
         item[0]
         for item in registered(hass, entry).values()
@@ -85,7 +85,7 @@ async def test_dhcp_flow_updates_host_and_reloads_same_entities(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     before = registered(hass, entry)
-    old_coordinator = hass.data[DOMAIN].devices["existing-cloud-id"].device.coordinator
+    old_coordinator = entry.runtime_data.device.coordinator
     info = DhcpServiceInfo(
         ip="192.0.2.42", hostname="soundbar", macaddress="94e6ba89bdba"
     )
@@ -106,7 +106,7 @@ async def test_dhcp_flow_updates_host_and_reloads_same_entities(
 async def test_external_local_state_reaches_actual_ha_entities(hass, entry, transports):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    device = hass.data[DOMAIN].devices["existing-cloud-id"].device
+    device = entry.runtime_data.device
     transports.rpc.status.return_value = {
         "power": "powerOn",
         "volume": 13,

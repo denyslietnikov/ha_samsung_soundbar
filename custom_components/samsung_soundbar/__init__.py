@@ -2,7 +2,7 @@ import logging
 from types import SimpleNamespace
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_DEVICE_ID as CONF_HA_DEVICE_ID
 from homeassistant.const import CONF_TOKEN
 from homeassistant.core import (
@@ -84,7 +84,6 @@ from .const import (
     SERVICE_DUMP_STATUS_SUMMARY,
 )
 from .coordinator import SoundbarCoordinator
-from .device_info import async_unmerge_official_smartthings_device
 from .entry_options import get_entry_option
 from .local_device import LocalDevice
 from .local_rpc import (
@@ -94,7 +93,8 @@ from .local_rpc import (
     LocalRpcError,
     LocalSoundbarRpcClient,
 )
-from .models import DeviceConfig, SoundbarConfig
+from .models import SoundbarConfigEntry, SoundbarRuntimeData
+from .services import async_register_entity_services
 from .subscription import async_remove_subscription, async_setup_subscription
 
 _LOGGER = logging.getLogger(__name__)
@@ -151,7 +151,17 @@ DUMP_LOCAL_RPC_SCHEMA = vol.Schema(
 )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register actions independently of config-entry and platform setup."""
+    _async_register_services(hass)
+    async_register_entity_services(hass)
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> bool:
     """Report actionable Cloud failures without routing access refusals to reauth."""
     try:
         return await _async_setup_entry(hass, entry)
@@ -173,12 +183,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise
 
 
-async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def async_remove_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> None:
     """Remove Repairs belonging to an entry which the user deleted."""
     clear_cloud_issues(hass, entry)
 
 
-async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def _async_setup_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> bool:
     """Set up Samsung Soundbar from config entry."""
 
     _LOGGER.info("[%s] Setting up entry", DOMAIN)
@@ -202,160 +212,147 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     api = auth_provider.api
 
-    if DOMAIN not in hass.data:
-        hass.data[DOMAIN] = SoundbarConfig(api, {}, auth_provider)
-
-    domain_config: SoundbarConfig = hass.data[DOMAIN]
-    domain_config.api = api
-    domain_config.auth_provider = auth_provider
-
-    _async_register_services(hass)
-
-    device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
-
-    if device_id not in domain_config.devices:
-        cloud_setup_error = None
-        suggested_area = None
-        try:
-            _LOGGER.debug(
-                "[%s] Validating SmartThings authentication for device %s",
-                DOMAIN,
-                device_id,
-            )
-
-            smart_things_device = ensure_device_entity(
-                api,
-                await api.get_device(device_id),
-            )
-            location_id = (
-                entry.data.get(CONF_LOCATION_ID)
-                or smart_things_device.location_id
-            )
-            if location_id != entry.data.get(CONF_LOCATION_ID):
-                hass.config_entries.async_update_entry(
-                    entry,
-                    data={**entry.data, CONF_LOCATION_ID: location_id},
-                )
-            if smart_things_device.room_id:
-                try:
-                    room = await api.get_room(
-                        location_id,
-                        smart_things_device.room_id,
-                    )
-                except (SmartThingsError, HomeAssistantError) as err:
-                    _LOGGER.debug(
-                        "[%s] Could not load SmartThings room metadata for %s: %s",
-                        DOMAIN,
-                        device_id,
-                        err,
-                    )
-                else:
-                    suggested_area = room.name
-
-        except (
-            SmartThingsAuthenticationFailedError,
-            SmartThingsForbiddenError,
-            SmartThingsRateLimitError,
-            ConfigEntryAuthFailed,
-            ConfigEntryNotReady,
-            CloudAccessError,
-            SmartThingsConnectionError,
-        ) as err:
-            cloud_setup_error = normalize_cloud_error(err)
-            if isinstance(err, SmartThingsAuthenticationFailedError):
-                cloud_setup_error = ConfigEntryAuthFailed(
-                    "SmartThings authorization is no longer valid"
-                )
-            if isinstance(err, SmartThingsConnectionError):
-                cloud_setup_error = ConfigEntryNotReady(
-                    "SmartThings Cloud temporarily unavailable"
-                )
-            if not hybrid:
-                raise cloud_setup_error from err
-            # The existing entry ID is authoritative; no new physical identity is guessed.
-            smart_things_device = SmartThingsDeviceCompat(
-                api,
-                SimpleNamespace(
-                    device_id=device_id,
-                    location_id=entry.data.get(CONF_LOCATION_ID),
-                    room_id=None,
-                ),
-            )
-
-        except Exception:
-            _LOGGER.exception(
-                "[%s] Unexpected error while loading device %s",
-                DOMAIN,
-                device_id,
-            )
-            raise
-
-        session = async_get_clientsession(hass)
-        local_rpc_client = None
-        if control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS:
-            local_host = str(get_entry_option(entry, CONF_LOCAL_HOST)).strip()
-            if local_host:
-                local_verify_ssl = get_entry_option(entry, CONF_LOCAL_VERIFY_SSL)
-                local_rpc_client = LocalSoundbarRpcClient(
-                    local_host,
-                    async_get_clientsession(hass, verify_ssl=local_verify_ssl),
-                    port=get_entry_option(entry, CONF_LOCAL_PORT),
-                    verify_ssl=local_verify_ssl,
-                    timeout=get_entry_option(entry, CONF_LOCAL_TIMEOUT),
-                )
-
-        soundbar_device = SoundbarDevice(
-            device=smart_things_device,
-            session=session,
-            auth_provider=auth_provider,
-            max_volume=get_entry_option(entry, CONF_ENTRY_MAX_VOLUME),
-            device_name=entry.data.get(CONF_ENTRY_DEVICE_NAME),
-            enable_eq=get_entry_option(entry, CONF_ENTRY_SETTINGS_EQ_SELECTOR),
-            enable_advanced_audio=get_entry_option(
-                entry,
-                CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
-            ),
-            enable_soundmode=get_entry_option(
-                entry,
-                CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
-            ),
-            enable_woofer=get_entry_option(entry, CONF_ENTRY_SETTINGS_WOOFER_NUMBER),
-            control_mode=control_mode,
-            local_rpc=local_rpc_client,
-            local_fallback_to_cloud=get_entry_option(
-                entry,
-                CONF_LOCAL_FALLBACK_TO_CLOUD,
-            ),
-            suggested_area=suggested_area,
+    device_id = entry.data[CONF_ENTRY_DEVICE_ID]
+    cloud_setup_error = None
+    suggested_area = None
+    try:
+        _LOGGER.debug(
+            "[%s] Validating SmartThings authentication for device %s",
+            DOMAIN,
+            device_id,
         )
 
-        coordinator = SoundbarCoordinator(hass, entry, soundbar_device)
-        if cloud_setup_error is not None:
-            soundbar_device.cloud_setup_pending = True
-            coordinator.cloud_failed(cloud_setup_error)
-        await coordinator.async_refresh()
+        smart_things_device = ensure_device_entity(
+            api,
+            await api.get_device(device_id),
+        )
+        location_id = (
+            entry.data.get(CONF_LOCATION_ID) or smart_things_device.location_id
+        )
+        if location_id != entry.data.get(CONF_LOCATION_ID):
+            hass.config_entries.async_update_entry(
+                entry,
+                data={**entry.data, CONF_LOCATION_ID: location_id},
+            )
+        if smart_things_device.room_id:
+            try:
+                room = await api.get_room(
+                    location_id,
+                    smart_things_device.room_id,
+                )
+            except (SmartThingsError, HomeAssistantError) as err:
+                _LOGGER.debug(
+                    "[%s] Could not load SmartThings room metadata for %s: %s",
+                    DOMAIN,
+                    device_id,
+                    err,
+                )
+            else:
+                suggested_area = room.name
 
-        domain_config.devices[device_id] = DeviceConfig(
-            entry.data,
-            soundbar_device,
-            dict(entry.options),
+    except (
+        SmartThingsAuthenticationFailedError,
+        SmartThingsForbiddenError,
+        SmartThingsRateLimitError,
+        ConfigEntryAuthFailed,
+        ConfigEntryNotReady,
+        CloudAccessError,
+        SmartThingsConnectionError,
+    ) as err:
+        cloud_setup_error = normalize_cloud_error(err)
+        if isinstance(err, SmartThingsAuthenticationFailedError):
+            cloud_setup_error = ConfigEntryAuthFailed(
+                "SmartThings authorization is no longer valid"
+            )
+        if isinstance(err, SmartThingsConnectionError):
+            cloud_setup_error = ConfigEntryNotReady(
+                "SmartThings Cloud temporarily unavailable"
+            )
+        if not hybrid:
+            raise cloud_setup_error from err
+        # The existing entry ID is authoritative; no new physical identity is guessed.
+        smart_things_device = SmartThingsDeviceCompat(
+            api,
+            SimpleNamespace(
+                device_id=device_id,
+                location_id=entry.data.get(CONF_LOCATION_ID),
+                room_id=None,
+            ),
         )
 
-        _LOGGER.info("[%s] Device initialized successfully", DOMAIN)
+    except Exception:
+        _LOGGER.exception(
+            "[%s] Unexpected error while loading device %s",
+            DOMAIN,
+            device_id,
+        )
+        raise
 
-    async_unmerge_official_smartthings_device(hass, entry, device_id)
+    session = async_get_clientsession(hass)
+    local_rpc_client = None
+    if control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS:
+        local_host = str(get_entry_option(entry, CONF_LOCAL_HOST)).strip()
+        if local_host:
+            local_verify_ssl = get_entry_option(entry, CONF_LOCAL_VERIFY_SSL)
+            local_rpc_client = LocalSoundbarRpcClient(
+                local_host,
+                async_get_clientsession(hass, verify_ssl=local_verify_ssl),
+                port=get_entry_option(entry, CONF_LOCAL_PORT),
+                verify_ssl=local_verify_ssl,
+                timeout=get_entry_option(entry, CONF_LOCAL_TIMEOUT),
+            )
+
+    soundbar_device = SoundbarDevice(
+        device=smart_things_device,
+        session=session,
+        auth_provider=auth_provider,
+        max_volume=get_entry_option(entry, CONF_ENTRY_MAX_VOLUME),
+        device_name=entry.data.get(CONF_ENTRY_DEVICE_NAME),
+        enable_eq=get_entry_option(entry, CONF_ENTRY_SETTINGS_EQ_SELECTOR),
+        enable_advanced_audio=get_entry_option(
+            entry,
+            CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
+        ),
+        enable_soundmode=get_entry_option(
+            entry,
+            CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
+        ),
+        enable_woofer=get_entry_option(entry, CONF_ENTRY_SETTINGS_WOOFER_NUMBER),
+        control_mode=control_mode,
+        local_rpc=local_rpc_client,
+        local_fallback_to_cloud=get_entry_option(
+            entry,
+            CONF_LOCAL_FALLBACK_TO_CLOUD,
+        ),
+        suggested_area=suggested_area,
+    )
+
+    coordinator = SoundbarCoordinator(hass, entry, soundbar_device)
+    if cloud_setup_error is not None:
+        soundbar_device.cloud_setup_pending = True
+        coordinator.cloud_failed(cloud_setup_error)
+    await coordinator.async_refresh()
+
+    entry.runtime_data = SoundbarRuntimeData(
+        device=soundbar_device,
+        coordinator=coordinator,
+        config=dict(entry.data),
+        options=dict(entry.options),
+        api=api,
+        auth_provider=auth_provider,
+    )
+
+    _LOGGER.info("[%s] Device initialized successfully", DOMAIN)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    subscription = None
-    if domain_config.devices[device_id].device.cloud_available:
-        subscription = await async_setup_subscription(
+    if entry.runtime_data.device.cloud_available:
+        entry.runtime_data.subscription = await async_setup_subscription(
             hass,
             entry,
             api,
-            domain_config.devices[device_id].device,
+            entry.runtime_data.device,
         )
-    if subscription is not None:
-        domain_config.subscriptions[entry.entry_id] = subscription
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
@@ -363,7 +360,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 def _async_remove_legacy_artwork_entity(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: SoundbarConfigEntry
 ) -> None:
     """Remove the old image entity without touching media player artwork."""
     device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
@@ -378,7 +375,7 @@ def _async_remove_legacy_artwork_entity(
 
 
 async def _async_setup_local_only_entry(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: SoundbarConfigEntry
 ) -> bool:
     """Load an existing entry without creating an OAuth or SmartThings client."""
     device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
@@ -386,85 +383,63 @@ async def _async_setup_local_only_entry(
     if not device_id or not local_host:
         raise ConfigEntryNotReady("Local soundbar device ID and host are required")
 
-    if DOMAIN not in hass.data:
-        hass.data[DOMAIN] = SoundbarConfig(None, {})
-    domain_config: SoundbarConfig = hass.data[DOMAIN]
-    if not domain_config.devices:
-        domain_config.api = None
-        domain_config.auth_provider = None
-    _async_register_services(hass)
+    verify_ssl = get_entry_option(entry, CONF_LOCAL_VERIFY_SSL)
+    local_rpc = LocalSoundbarRpcClient(
+        local_host,
+        async_get_clientsession(hass, verify_ssl=verify_ssl),
+        port=get_entry_option(entry, CONF_LOCAL_PORT),
+        verify_ssl=verify_ssl,
+        timeout=get_entry_option(entry, CONF_LOCAL_TIMEOUT),
+    )
+    soundbar_device = SoundbarDevice(
+        device=LocalDevice(device_id),
+        session=async_get_clientsession(hass),
+        auth_provider=None,
+        max_volume=get_entry_option(entry, CONF_ENTRY_MAX_VOLUME),
+        device_name=entry.data.get(CONF_ENTRY_DEVICE_NAME) or local_host,
+        enable_eq=False,
+        enable_advanced_audio=False,
+        enable_soundmode=False,
+        enable_woofer=False,
+        control_mode=CONTROL_MODE_LOCAL_ONLY,
+        local_rpc=local_rpc,
+        local_fallback_to_cloud=False,
+    )
+    coordinator = SoundbarCoordinator(hass, entry, soundbar_device)
+    await coordinator.async_refresh()
+    entry.runtime_data = SoundbarRuntimeData(
+        device=soundbar_device,
+        coordinator=coordinator,
+        config=dict(entry.data),
+        options=dict(entry.options),
+    )
 
-    if device_id not in domain_config.devices:
-        verify_ssl = get_entry_option(entry, CONF_LOCAL_VERIFY_SSL)
-        local_rpc = LocalSoundbarRpcClient(
-            local_host,
-            async_get_clientsession(hass, verify_ssl=verify_ssl),
-            port=get_entry_option(entry, CONF_LOCAL_PORT),
-            verify_ssl=verify_ssl,
-            timeout=get_entry_option(entry, CONF_LOCAL_TIMEOUT),
-        )
-        soundbar_device = SoundbarDevice(
-            device=LocalDevice(device_id),
-            session=async_get_clientsession(hass),
-            auth_provider=None,
-            max_volume=get_entry_option(entry, CONF_ENTRY_MAX_VOLUME),
-            device_name=entry.data.get(CONF_ENTRY_DEVICE_NAME) or local_host,
-            enable_eq=False,
-            enable_advanced_audio=False,
-            enable_soundmode=False,
-            enable_woofer=False,
-            control_mode=CONTROL_MODE_LOCAL_ONLY,
-            local_rpc=local_rpc,
-            local_fallback_to_cloud=False,
-        )
-        coordinator = SoundbarCoordinator(hass, entry, soundbar_device)
-        await coordinator.async_refresh()
-        domain_config.devices[device_id] = DeviceConfig(
-            entry.data, soundbar_device, dict(entry.options)
-        )
-
-    async_unmerge_official_smartthings_device(hass, entry, device_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
+async def async_unload_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
     if unload_ok:
-        domain_data = hass.data.get(DOMAIN)
-        if domain_data:
-            device_config = domain_data.devices.get(entry.data.get(CONF_ENTRY_DEVICE_ID))
-            if device_config is not None and device_config.device.coordinator is not None:
-                await device_config.device.coordinator.async_shutdown()
-            subscription = domain_data.subscriptions.pop(entry.entry_id, None)
-            if subscription is not None:
-                await async_remove_subscription(entry, subscription)
-            domain_data.devices.pop(entry.data.get(CONF_ENTRY_DEVICE_ID), None)
-            if not domain_data.devices:
-                hass.services.async_remove(DOMAIN, SERVICE_DUMP_DISCOVERY_SNAPSHOT)
-                hass.services.async_remove(DOMAIN, SERVICE_DUMP_EXECUTE_PAYLOAD)
-                hass.services.async_remove(DOMAIN, SERVICE_DUMP_LOCAL_RPC)
-                hass.services.async_remove(DOMAIN, SERVICE_DUMP_STATUS_SUMMARY)
-                hass.data.pop(DOMAIN, None)
-
+        runtime = entry.runtime_data
+        await runtime.coordinator.async_shutdown()
+        if runtime.subscription is not None:
+            await async_remove_subscription(entry, runtime.subscription)
+        del entry.runtime_data
     return unload_ok
 
 
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    runtime = hass.data.get(DOMAIN)
-    configured = (
-        runtime.devices.get(entry.data.get(CONF_ENTRY_DEVICE_ID)) if runtime else None
-    )
-    if configured is not None and configured.options is not None:
+async def async_reload_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> None:
+    runtime = getattr(entry, "runtime_data", None)
+    if runtime is not None and not runtime.reauth_pending:
         ignored = {CONF_TOKEN, CONF_SUBSCRIPTION_ID}
         before = {
-            key: value for key, value in configured.config.items() if key not in ignored
+            key: value for key, value in runtime.config.items() if key not in ignored
         }
         after = {key: value for key, value in entry.data.items() if key not in ignored}
-        if before == after and configured.options == entry.options:
+        if before == after and runtime.options == entry.options:
             return
     await hass.config_entries.async_reload(entry.entry_id)
 
@@ -512,13 +487,8 @@ def _async_create_dump_execute_payload_service(hass: HomeAssistant):
     """Create the execute payload dump service handler."""
 
     async def async_dump_execute_payload(call: ServiceCall) -> ServiceResponse:
-        domain_config: SoundbarConfig | None = hass.data.get(DOMAIN)
-        if domain_config is None or not domain_config.devices:
-            raise HomeAssistantError("No Samsung Soundbar devices are loaded")
-
         soundbar_device = _async_resolve_service_device(
             hass,
-            domain_config,
             call.data.get(CONF_HA_DEVICE_ID),
         )
         _require_cloud_device(soundbar_device)
@@ -552,13 +522,8 @@ def _async_create_dump_status_summary_service(hass: HomeAssistant):
     """Create the status summary dump service handler."""
 
     async def async_dump_status_summary(call: ServiceCall) -> ServiceResponse:
-        domain_config: SoundbarConfig | None = hass.data.get(DOMAIN)
-        if domain_config is None or not domain_config.devices:
-            raise HomeAssistantError("No Samsung Soundbar devices are loaded")
-
         soundbar_device = _async_resolve_service_device(
             hass,
-            domain_config,
             call.data.get(CONF_HA_DEVICE_ID),
         )
         _require_cloud_device(soundbar_device)
@@ -573,13 +538,8 @@ def _async_create_dump_discovery_snapshot_service(hass: HomeAssistant):
     """Create the raw discovery snapshot service handler."""
 
     async def async_dump_discovery_snapshot(call: ServiceCall) -> ServiceResponse:
-        domain_config: SoundbarConfig | None = hass.data.get(DOMAIN)
-        if domain_config is None or not domain_config.devices:
-            raise HomeAssistantError("No Samsung Soundbar devices are loaded")
-
         soundbar_device = _async_resolve_service_device(
             hass,
-            domain_config,
             call.data.get(CONF_HA_DEVICE_ID),
         )
         return await soundbar_device.async_dump_discovery_snapshot(
@@ -745,29 +705,29 @@ def _require_cloud_device(device: SoundbarDevice) -> None:
 
 def _async_resolve_service_device(
     hass: HomeAssistant,
-    domain_config: SoundbarConfig,
     ha_device_id: str | None,
 ) -> SoundbarDevice:
-    """Resolve a Home Assistant device id to a loaded SoundbarDevice."""
+    """Resolve a registry device to its owning, loaded config entry."""
+    entries = [
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.state is ConfigEntryState.LOADED and hasattr(entry, "runtime_data")
+    ]
+    if not entries:
+        raise HomeAssistantError("No Samsung Soundbar devices are loaded")
     if ha_device_id is None:
-        if len(domain_config.devices) == 1:
-            return next(iter(domain_config.devices.values())).device
+        if len(entries) == 1:
+            return entries[0].runtime_data.device
         raise HomeAssistantError(
             "device_id is required when multiple soundbars are loaded"
         )
 
-    device_registry = dr.async_get(hass)
-    device_entry = device_registry.async_get(ha_device_id)
+    device_entry = dr.async_get(hass).async_get(ha_device_id)
     if device_entry is None:
         raise HomeAssistantError(f"Unknown Home Assistant device_id: {ha_device_id}")
-
-    for identifier_domain, identifier in device_entry.identifiers:
-        if identifier_domain != DOMAIN:
-            continue
-        device_config = domain_config.devices.get(identifier)
-        if device_config is not None:
-            return device_config.device
-
+    for entry in entries:
+        if entry.entry_id == device_entry.config_entry_id:
+            return entry.runtime_data.device
     raise HomeAssistantError(
         "Selected device is not a loaded Samsung Soundbar integration device"
     )

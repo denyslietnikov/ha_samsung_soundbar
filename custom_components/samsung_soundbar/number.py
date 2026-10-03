@@ -5,35 +5,28 @@ from homeassistant.components.number import (
     NumberEntityDescription,
     NumberMode,
 )
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api_extension.SoundbarDevice import SoundbarDevice
-from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
 from .device_info import build_device_info
 from .entity_updates import register_device_update_listener
-from .models import DeviceConfig
+from .models import SoundbarConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    domain_data = hass.data[DOMAIN]
-
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: SoundbarConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    device = config_entry.runtime_data.device
     entities = []
-    for key in domain_data.devices:
-        device_config: DeviceConfig = domain_data.devices[key]
-        device = device_config.device
-        if device.device_id == config_entry.data.get(
-            CONF_ENTRY_DEVICE_ID
-        ) and device.can_control_woofer_level:
-            entities.append(
-                SoundbarWooferNumberEntity(
-                    device,
-                    "woofer_level",
-                )
-            )
-            register_device_update_listener(config_entry, device, entities)
+    if device.can_control_woofer_level:
+        entities.append(SoundbarWooferNumberEntity(device, "woofer_level"))
+        register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
-    return True
 
 
 class SoundbarWooferNumberEntity(NumberEntity):

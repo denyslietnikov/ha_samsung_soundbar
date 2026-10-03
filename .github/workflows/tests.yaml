@@ -24,9 +24,22 @@ jobs:
         run: python -m unittest discover -s tests -q
       - name: Real HA runtime tests (network blocked)
         run: python -m pytest tests/ha -q
-      - name: Lint Cloud Repairs and HA tests
+      - name: Lint HA lifecycle, Cloud Repairs and runtime tests
         run: >-
           ruff check
+          custom_components/samsung_soundbar/__init__.py
+          custom_components/samsung_soundbar/auth.py
+          custom_components/samsung_soundbar/config_flow.py
+          custom_components/samsung_soundbar/device_info.py
+          custom_components/samsung_soundbar/entity_updates.py
+          custom_components/samsung_soundbar/media_player.py
+          custom_components/samsung_soundbar/models.py
+          custom_components/samsung_soundbar/number.py
+          custom_components/samsung_soundbar/select.py
+          custom_components/samsung_soundbar/sensor.py
+          custom_components/samsung_soundbar/services.py
+          custom_components/samsung_soundbar/subscription.py
+          custom_components/samsung_soundbar/switch.py
           custom_components/samsung_soundbar/cloud_errors.py
           custom_components/samsung_soundbar/cloud_repairs.py
           custom_components/samsung_soundbar/repairs.py

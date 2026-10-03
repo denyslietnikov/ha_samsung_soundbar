@@ -1,12 +1,13 @@
 import logging
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api_extension.SoundbarDevice import SoundbarDevice
-from .const import CONF_ENTRY_DEVICE_ID, DOMAIN
 from .device_info import build_device_info
 from .entity_updates import register_device_update_listener
-from .models import DeviceConfig
+from .models import SoundbarConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,59 +19,56 @@ SWITCH_ENTITY_NAMES = {
 }
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    domain_data = hass.data[DOMAIN]
-
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: SoundbarConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    device = config_entry.runtime_data.device
     entities = []
-    for key in domain_data.devices:
-        device_config: DeviceConfig = domain_data.devices[key]
-        device = device_config.device
-        if device.device_id == config_entry.data.get(
-            CONF_ENTRY_DEVICE_ID
-        ) and device.can_control_advanced_audio:
-            entities.append(
-                SoundbarSwitchAdvancedAudio(
-                    device,
-                    "nightmode",
-                    lambda: device.night_mode,
-                    device.set_night_mode,
-                    device.set_night_mode,
-                    "mdi:weather-night",
-                )
+    if device.can_control_advanced_audio:
+        entities.append(
+            SoundbarSwitchAdvancedAudio(
+                device,
+                "nightmode",
+                lambda: device.night_mode,
+                device.set_night_mode,
+                device.set_night_mode,
+                "mdi:weather-night",
             )
-            entities.append(
-                SoundbarSwitchAdvancedAudio(
-                    device,
-                    "bassmode",
-                    lambda: device.bass_mode,
-                    device.set_bass_mode,
-                    device.set_bass_mode,
-                    "mdi:speaker-wireless",
-                )
+        )
+        entities.append(
+            SoundbarSwitchAdvancedAudio(
+                device,
+                "bassmode",
+                lambda: device.bass_mode,
+                device.set_bass_mode,
+                device.set_bass_mode,
+                "mdi:speaker-wireless",
             )
-            entities.append(
-                SoundbarSwitchAdvancedAudio(
-                    device,
-                    "voice_amplifier",
-                    lambda: device.voice_amplifier,
-                    device.set_voice_amplifier,
-                    device.set_voice_amplifier,
-                    "mdi:account-voice",
-                )
+        )
+        entities.append(
+            SoundbarSwitchAdvancedAudio(
+                device,
+                "voice_amplifier",
+                lambda: device.voice_amplifier,
+                device.set_voice_amplifier,
+                device.set_voice_amplifier,
+                "mdi:account-voice",
             )
-            entities.append(
-                SoundbarSwitchAdvancedAudio(
-                    device,
-                    "virtual",
-                    lambda: device.virtual_sound,
-                    device.set_virtual_sound,
-                    device.set_virtual_sound,
-                    "mdi:surround-sound",
-                )
+        )
+        entities.append(
+            SoundbarSwitchAdvancedAudio(
+                device,
+                "virtual",
+                lambda: device.virtual_sound,
+                device.set_virtual_sound,
+                device.set_virtual_sound,
+                "mdi:surround-sound",
             )
-            register_device_update_listener(config_entry, device, entities)
+        )
+        register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
-    return True
 
 
 class SoundbarSwitchAdvancedAudio(SwitchEntity):
@@ -115,7 +113,10 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
     # ------ STATE FUNCTIONS --------
     @property
     def is_on(self) -> bool:
-        if self.__device.coordinator is not None or self.__device.has_advanced_audio_state:
+        if (
+            self.__device.coordinator is not None
+            or self.__device.has_advanced_audio_state
+        ):
             return bool(self.__state_function())
         return bool(self.__state)
 

@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
 from homeassistant.helpers.entity import Entity
 
 from .api_extension.SoundbarDevice import SoundbarDevice
+from .models import SoundbarConfigEntry
 
 
 def register_device_update_listener(
-    config_entry: ConfigEntry,
+    config_entry: SoundbarConfigEntry,
     device: SoundbarDevice,
     entities: Iterable[Entity],
 ) -> None:

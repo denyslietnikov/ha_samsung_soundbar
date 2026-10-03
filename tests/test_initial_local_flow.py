@@ -174,7 +174,9 @@ class TestInitialLocalFlow(IsolatedAsyncioTestCase):
         self.flow._device_locations = {"cloud-id": "location-id"}
         self.flow._get_reauth_entry = MagicMock(return_value=entry)
         self.flow._abort_if_unique_id_mismatch = MagicMock()
-        self.flow.async_update_reload_and_abort = MagicMock(
+        entry.runtime_data = None
+        entry.update_listeners = []
+        self.flow.async_update_and_abort = MagicMock(
             side_effect=lambda _entry, **kw: kw
         )
         result = await self.flow._async_finish_reauth({CONF_TOKEN: {"access_token": "new"}})

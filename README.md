@@ -19,7 +19,7 @@ operation with recent Home Assistant releases and Samsung HW-Q800F.
 
 ## Requirements
 
-- Home Assistant `2026.6.1` or newer.
+- Home Assistant `2026.9.4` or newer.
 - Integration version `0.7.0b63` uses `pysmartthings 4.0.3`.
 - SmartThings OAuth-In application for SmartThings Cloud or Hybrid mode.
 - For Hybrid or Local-only mode: the soundbar reachable on the local network
@@ -249,7 +249,11 @@ real config-entry manager, entity/device registries, platforms, service calls,
 Repairs, Options and reauth flows. Only external OAuth, SmartThings and LAN
 transports are replaced; network access is blocked. They cover setup,
 reload/unload, external state updates, readback, DHCP recovery, Cloud failures,
-and Local-only migration without changing IDs. They do not replace field-tests
+and Local-only migration without changing IDs. API compatibility tests also
+cover successful reauth with changed or unchanged credentials, entry-scoped
+runtime/client isolation, scoped device lookup, OAuth retry classification, and
+entity actions registered before platform setup and retained after unload.
+They do not replace field-tests
 on a Q800F. GitHub Actions runs both suites on pushes and pull requests.
 
 ## Attribution

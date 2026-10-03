@@ -1,106 +1,37 @@
 import logging
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
-from homeassistant.components.media_player import MediaPlayerDeviceClass, MediaPlayerEntity
-from homeassistant.components.media_player.const import MediaPlayerEntityFeature
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers import config_validation as cv, entity_platform, selector
-import voluptuous as vol
-
-from .api_extension.SoundbarDevice import SoundbarDevice
-from .api_extension.const import SpeakerIdentifier, RearSpeakerMode
-from .const import (
-    CONF_ENTRY_DEVICE_ID,
-    DOMAIN,
+from homeassistant.components.media_player import (
+    MediaPlayerDeviceClass,
+    MediaPlayerEntity,
 )
+from homeassistant.components.media_player.const import MediaPlayerEntityFeature
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .api_extension.const import RearSpeakerMode, SpeakerIdentifier
+from .api_extension.SoundbarDevice import SoundbarDevice
 from .device_info import build_device_info
 from .entity_updates import register_device_update_listener
-from .models import DeviceConfig
+from .models import SoundbarConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_NAME = "SmartThings Soundbar"
 CONF_MAX_VOLUME = "max_volume"
 
-def addServices():
-    platform = entity_platform.async_get_current_platform()
 
-    platform.async_register_entity_service(
-        "select_soundmode",
-        cv.make_entity_service_schema({vol.Required("sound_mode"): str}),
-        SmartThingsSoundbarMediaPlayer.async_select_sound_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_woofer_level",
-        cv.make_entity_service_schema(
-            {vol.Required("level"): vol.All(int, vol.Range(min=-12, max=6))}
-        ),
-        SmartThingsSoundbarMediaPlayer.async_set_woofer_level.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_night_mode",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_night_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_bass_enhancer",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_bass_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_voice_enhancer",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_voice_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_speaker_level",
-        cv.make_entity_service_schema(
-            {vol.Required("speaker_identifier"): str, vol.Required("level"): int}
-        ),
-        SmartThingsSoundbarMediaPlayer.async_set_speaker_level.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_rear_speaker_mode",
-        cv.make_entity_service_schema({vol.Required("speaker_mode"): str}),
-        SmartThingsSoundbarMediaPlayer.async_set_rear_speaker_mode.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_active_voice_amplifier",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_active_voice_amplifier.__name__,
-    )
-
-    platform.async_register_entity_service(
-        "set_space_fit_sound",
-        cv.make_entity_service_schema({vol.Required("enabled"): bool}),
-        SmartThingsSoundbarMediaPlayer.async_set_space_fit_sound.__name__,
-    )
-
-
-
-
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    domain_data = hass.data[DOMAIN]
-
-    addServices()
-
-    entities = []
-    for key in domain_data.devices:
-        device_config: DeviceConfig = domain_data.devices[key]
-        session = async_get_clientsession(hass)
-        device = device_config.device
-        if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
-            entities.append(SmartThingsSoundbarMediaPlayer(device, session))
-            register_device_update_listener(config_entry, device, entities)
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: SoundbarConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    device = config_entry.runtime_data.device
+    entities = [SmartThingsSoundbarMediaPlayer(device, async_get_clientsession(hass))]
+    register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
-    return True
 
 
 class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):

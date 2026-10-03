@@ -1,18 +1,16 @@
-import logging
 import datetime
+import logging
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .api_extension.SoundbarDevice import SoundbarDevice
-from .const import (
-    CONF_ENTRY_DEVICE_ID,
-    DOMAIN,
-)
 from .device_info import build_device_info
 from .entity_updates import register_device_update_listener
-from .models import DeviceConfig
+from .models import SoundbarConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 _INVALID_RESTORED_STATES = {STATE_UNAVAILABLE, STATE_UNKNOWN, None}
@@ -33,31 +31,26 @@ def _select_options(options: list[str] | None, current: str | None) -> list[str]
     return values
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    domain_data = hass.data[DOMAIN]
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: SoundbarConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    device = config_entry.runtime_data.device
     entities = []
-    for key in domain_data.devices:
-        device_config: DeviceConfig = domain_data.devices[key]
-        device = device_config.device
-        if device.device_id == config_entry.data.get(CONF_ENTRY_DEVICE_ID):
-            if device.can_select_equalizer_preset:
-                entities.append(
-                    EqPresetSelectEntity(device, "eq_preset", "mdi:tune-vertical")
-                )
-            if device.can_select_sound_mode:
-                entities.append(
-                    SoundModeSelectEntity(
-                        device, "sound_mode_preset", "mdi:surround-sound"
-                    )
-                )
+    if device.can_select_equalizer_preset:
+        entities.append(EqPresetSelectEntity(device, "eq_preset", "mdi:tune-vertical"))
+    if device.can_select_sound_mode:
+        entities.append(
+            SoundModeSelectEntity(device, "sound_mode_preset", "mdi:surround-sound")
+        )
 
-            if device.can_select_source:
-                entities.append(
-                    InputSelectEntity(device, "input_preset", "mdi:video-input-hdmi")
-                )
-            register_device_update_listener(config_entry, device, entities)
+    if device.can_select_source:
+        entities.append(
+            InputSelectEntity(device, "input_preset", "mdi:video-input-hdmi")
+        )
+    register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
-    return True
 
 
 class EqPresetSelectEntity(SelectEntity):
@@ -111,6 +104,7 @@ class EqPresetSelectEntity(SelectEntity):
 
 class SoundModeSelectEntity(SelectEntity, RestoreEntity):
     _soundbar_cloud_capabilities = ("execute",)
+
     def __init__(
         self,
         device: SoundbarDevice,
@@ -174,6 +168,7 @@ class SoundModeSelectEntity(SelectEntity, RestoreEntity):
 
 class InputSelectEntity(SelectEntity, RestoreEntity):
     _soundbar_cloud_capabilities = ("mediaInputSource", "samsungvd.audioInputSource")
+
     def __init__(
         self,
         device: SoundbarDevice,

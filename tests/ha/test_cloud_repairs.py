@@ -49,7 +49,7 @@ def cloud_mode(hass, entry, mode=CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS):
 
 
 def device(hass):
-    return hass.data[DOMAIN].devices["existing-cloud-id"].device
+    return hass.config_entries.async_entries(DOMAIN)[0].runtime_data.device
 
 
 def issue(registry, entry, kind):
@@ -313,8 +313,8 @@ async def test_repair_migration_also_recovers_failed_cloud_setup(
     assert issue(issue_registry, entry, "access") is None
     assert "token" not in entry.data
     assert device(hass).local_only
-    assert hass.data[DOMAIN].api is None
-    assert hass.data[DOMAIN].auth_provider is None
+    assert entry.runtime_data.api is None
+    assert entry.runtime_data.auth_provider is None
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
     assert transports.auth.await_count == count
 

@@ -94,9 +94,6 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         self.client_session = patch.object(
             integration, "async_get_clientsession", return_value=self.session
         )
-        self.device_registry = patch.object(
-            integration, "async_unmerge_official_smartthings_device"
-        )
         self.entity_registry = MagicMock()
         self.entity_registry.async_get_entity_id.return_value = None
         self.entity_registry.async_get.return_value.config_entry_id = self.entry.entry_id
@@ -112,7 +109,6 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
             self.cloud_subscription,
             self.local_client,
             self.client_session,
-            self.device_registry,
             self.entity_registry_get,
             self.services,
             self.timer,
@@ -131,9 +127,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         }
         self.entry.options = {}
         self.assertTrue(await async_setup_entry(self.hass, self.entry))
-        device = self.hass.data[DOMAIN].devices[
-            "local:wifi_mac:94:e6:ba:89:bd:ba"
-        ].device
+        device = self.entry.runtime_data.device
         self.assertEqual(device.sound_mode, "Game Pro")
         self.assertTrue(await async_unload_entry(self.hass, self.entry))
         self.assertTrue(await async_setup_entry(self.hass, self.entry))
@@ -143,7 +137,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
 
     async def test_setup_and_reload_do_not_require_oauth_or_cloud(self) -> None:
         self.assertTrue(await async_setup_entry(self.hass, self.entry))
-        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        device = self.entry.runtime_data.device
         self.assertEqual(device.device_id, "existing-smartthings-id")
         self.assertTrue(device.available)
         self.assertEqual(device.sound_mode, "Game Pro")
@@ -180,7 +174,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
     async def test_local_failure_recovers_without_cloud_fallback(self) -> None:
         self.rpc.status.side_effect = [LocalRpcError("offline"), LOCAL_STATUS]
         self.assertTrue(await async_setup_entry(self.hass, self.entry))
-        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        device = self.entry.runtime_data.device
         self.assertFalse(device.available)
         listener = MagicMock()
         device.add_update_listener(listener)
@@ -194,7 +188,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
 
     async def test_lan_loss_marks_fresh_local_only_state_unavailable_and_recovers(self) -> None:
         await async_setup_entry(self.hass, self.entry)
-        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        device = self.entry.runtime_data.device
         listener = MagicMock()
         device.add_update_listener(listener)
         self.rpc.status.side_effect = LocalRpcError("offline")
@@ -214,7 +208,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
 
     async def test_fast_poll_outage_recovers_without_oauth(self) -> None:
         await async_setup_entry(self.hass, self.entry)
-        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        device = self.entry.runtime_data.device
         self.rpc.power_state = AsyncMock(side_effect=LocalRpcError("offline"))
         self.rpc.input_source = AsyncMock(return_value="E_ARC")
         self.rpc.volume = AsyncMock(return_value=8)
@@ -231,7 +225,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
 
     async def test_streaming_fixtures_keep_wifi_and_clear_stale_sound_from(self) -> None:
         await async_setup_entry(self.hass, self.entry)
-        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        device = self.entry.runtime_data.device
         for source, name in (
             ("WIFI_AIRPLAY", "AirPlay"), ("WIFI_GOOGLE", "Google Cast"),
             ("WIFI_ROON", "Roon"), ("CD", "Roon"),
@@ -276,7 +270,6 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
             "number": number_platform,
         }
         with (
-            patch.object(media_player_platform, "addServices"),
             patch.object(
                 media_player_platform,
                 "async_get_clientsession",
@@ -300,7 +293,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
         self.rpc.volume = AsyncMock(return_value=9)
         self.rpc.is_muted = AsyncMock(return_value=False)
         self.rpc.sound_mode = AsyncMock(return_value="GAME")
-        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        device = self.entry.runtime_data.device
         listener = MagicMock()
         device.add_update_listener(listener)
 
@@ -332,7 +325,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
 
     async def test_overlapping_local_ticks_do_not_duplicate_poll(self) -> None:
         await async_setup_entry(self.hass, self.entry)
-        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        device = self.entry.runtime_data.device
         started = asyncio.Event()
         release = asyncio.Event()
 
@@ -352,7 +345,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
 
     async def test_local_entities_do_not_start_private_timers(self) -> None:
         await async_setup_entry(self.hass, self.entry)
-        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        device = self.entry.runtime_data.device
         player = media_player_platform.SmartThingsSoundbarMediaPlayer(
             device, self.session
         )
@@ -364,7 +357,7 @@ class TestLocalOnlyStartup(IsolatedAsyncioTestCase):
 
     async def test_local_command_failure_cannot_use_cloud(self) -> None:
         await async_setup_entry(self.hass, self.entry)
-        device = self.hass.data[DOMAIN].devices["existing-smartthings-id"].device
+        device = self.entry.runtime_data.device
         self.rpc.power_on = AsyncMock(side_effect=LocalRpcError("offline"))
 
         with self.assertRaises(HomeAssistantError):

@@ -2,53 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .const import CONTROL_MODE_LOCAL_ONLY, DOMAIN
 
 SMARTTHINGS_CONFIGURATION_URL = "https://account.smartthings.com"
-_LOGGER = logging.getLogger(__name__)
-
-
-def async_unmerge_official_smartthings_device(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    device_id: str,
-) -> None:
-    """Split a device previously merged through shared network connections."""
-    registry = dr.async_get(hass)
-    own_identifier = (DOMAIN, device_id)
-    existing = registry.async_get_device_by_identifier(
-        own_identifier,
-        entry.entry_id,
-    )
-    if existing is None or not any(
-        identifier_domain == "smartthings"
-        for identifier_domain, _ in existing.identifiers
-    ):
-        return
-
-    remaining_identifiers = existing.identifiers - {own_identifier}
-    if not remaining_identifiers:
-        return
-
-    registry.async_update_device(
-        existing.id,
-        remove_config_entry_id=entry.entry_id,
-        new_identifiers=remaining_identifiers,
-    )
-    _LOGGER.info(
-        "Separated Samsung Soundbar device %s from the official SmartThings "
-        "device registry entry",
-        device_id,
-    )
 
 
 def build_device_info(device: SoundbarDevice) -> DeviceInfo:
@@ -73,9 +34,7 @@ def build_device_info(device: SoundbarDevice) -> DeviceInfo:
         sw_version = _clean(getattr(ocf, "firmware_version", None)) or sw_version
 
     if (viper := getattr(smartthings_device, "viper", None)) is not None:
-        manufacturer = (
-            _clean(getattr(viper, "manufacturer_name", None)) or manufacturer
-        )
+        manufacturer = _clean(getattr(viper, "manufacturer_name", None)) or manufacturer
         model = _clean(getattr(viper, "model_name", None)) or model
         hw_version = _clean(getattr(viper, "hardware_version", None)) or hw_version
         sw_version = _clean(getattr(viper, "software_version", None)) or sw_version
@@ -83,9 +42,7 @@ def build_device_info(device: SoundbarDevice) -> DeviceInfo:
     if (matter := getattr(smartthings_device, "matter", None)) is not None:
         hw_version = _clean(getattr(matter, "hardware_version", None)) or hw_version
         sw_version = _clean(getattr(matter, "software_version", None)) or sw_version
-        serial_number = (
-            _clean(getattr(matter, "serial_number", None)) or serial_number
-        )
+        serial_number = _clean(getattr(matter, "serial_number", None)) or serial_number
 
     manufacturer = manufacturer or _clean(_status_value(device, "ocf", "mnmn"))
     model = model or _normalize_model(_status_value(device, "ocf", "mnmo"))

@@ -18,7 +18,6 @@ from custom_components.samsung_soundbar.api_extension.SoundbarDevice import (
 from custom_components.samsung_soundbar.const import (
     CONF_ENTRY_DEVICE_ID,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
-    DOMAIN,
 )
 from custom_components.samsung_soundbar.coordinator import SoundbarCoordinator
 from custom_components.samsung_soundbar.entity_updates import (
@@ -264,9 +263,7 @@ class TestCapabilityHygiene(IsolatedAsyncioTestCase):
             local_rpc=MagicMock(),
         )
         hass, entry = MagicMock(), MagicMock()
-        hass.data = {
-            DOMAIN: SimpleNamespace(devices={"id": SimpleNamespace(device=device)})
-        }
+        entry.runtime_data = SimpleNamespace(device=device)
         entry.data = {CONF_ENTRY_DEVICE_ID: "id"}
         entities = []
         await sensor.async_setup_entry(hass, entry, entities.extend)

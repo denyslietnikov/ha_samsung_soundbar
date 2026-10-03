@@ -29,6 +29,7 @@ class TestLocalOnlyMigration(IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.entry = MagicMock()
         self.entry.entry_id = "entry-1"
+        self.entry.runtime_data = None
         self.entry.data = {
             CONF_ENTRY_DEVICE_ID: "smartthings-device-id",
             CONF_ENTRY_DEVICE_NAME: "Soundbar Q800F",
@@ -139,8 +140,8 @@ class TestLocalOnlyMigration(IsolatedAsyncioTestCase):
     async def test_cloud_subscription_is_removed_before_credential_cleanup(self) -> None:
         subscription = MagicMock()
         runtime = MagicMock()
-        runtime.subscriptions = {self.entry.entry_id: subscription}
-        self.hass.data = {"samsung_soundbar": runtime}
+        runtime.subscription = subscription
+        self.entry.runtime_data = runtime
 
         with patch(
             "custom_components.samsung_soundbar.config_flow.async_remove_subscription",
