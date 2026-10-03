@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  home-assistant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+      - name: Install pinned HA test harness
+        run: python -m pip install -r requirements-test.txt
+      - name: Unit and transport regression tests
+        run: python -m unittest discover -s tests -q
+      - name: Real HA runtime tests (network blocked)
+        run: python -m pytest tests/ha -q
+      - name: Lint Cloud Repairs and HA tests
+        run: >-
+          ruff check
+          custom_components/samsung_soundbar/cloud_errors.py
+          custom_components/samsung_soundbar/cloud_repairs.py
+          custom_components/samsung_soundbar/repairs.py
+          tests/ha tests/test_cloud_errors.py

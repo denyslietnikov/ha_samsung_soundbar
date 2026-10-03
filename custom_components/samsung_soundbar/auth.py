@@ -13,7 +13,6 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     OAuth2TokenRequestError,
     OAuth2TokenRequestReauthError,
-    OAuth2TokenRequestTransientError,
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.config_entry_oauth2_flow import (
@@ -22,6 +21,8 @@ from homeassistant.helpers.config_entry_oauth2_flow import (
     async_get_config_entry_implementation,
 )
 from pysmartthings import SmartThings
+
+from .cloud_errors import SmartThingsHttpSession, cloud_error_for_status
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class SmartThingsAuthProvider:
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        oauth_session: OAuth2Session,
+        oauth_session: OAuth2Session | None,
         api: SmartThings,
     ) -> None:
         """Initialize the auth provider."""
@@ -48,38 +49,56 @@ class SmartThingsAuthProvider:
         cls,
         hass: HomeAssistant,
         entry: ConfigEntry,
+        *,
+        defer_auth: bool = False,
     ) -> SmartThingsAuthProvider:
         """Create an auth provider for a config entry."""
-        try:
-            implementation = await async_get_config_entry_implementation(hass, entry)
-        except (ImplementationUnavailableError, ValueError) as err:
-            raise ConfigEntryAuthFailed(
-                "SmartThings OAuth application credentials are unavailable"
-            ) from err
-        oauth_session = OAuth2Session(hass, entry, implementation)
-        api = SmartThings(session=async_get_clientsession(hass))
-        provider = cls(hass, entry, oauth_session, api)
-        await provider.async_get_access_token()
+        api = SmartThings(session=SmartThingsHttpSession(async_get_clientsession(hass)))
+        provider = cls(hass, entry, None, api)
+        if not defer_auth:
+            await provider.async_get_access_token()
         return provider
 
     async def async_get_access_token(self, *, force_refresh: bool = False) -> str:
         """Return a valid access token and update the API client."""
+        if CONF_TOKEN not in self.entry.data:
+            raise ConfigEntryAuthFailed("SmartThings OAuth authorization is required")
         try:
+            if self.oauth_session is None:
+                try:
+                    implementation = await async_get_config_entry_implementation(
+                        self.hass, self.entry
+                    )
+                except (ImplementationUnavailableError, ValueError) as err:
+                    raise ConfigEntryAuthFailed(
+                        "SmartThings OAuth application credentials are unavailable"
+                    ) from err
+                self.oauth_session = OAuth2Session(
+                    self.hass, self.entry, implementation
+                )
             if force_refresh:
                 await self._async_force_refresh_token()
             else:
                 await self.oauth_session.async_ensure_token_valid()
         except OAuth2TokenRequestReauthError as err:
+            if mapped := cloud_error_for_status(err.status, err.headers):
+                raise mapped from err
             raise ConfigEntryAuthFailed(
                 "SmartThings OAuth refresh token is no longer valid"
             ) from err
-        except (ClientError, OAuth2TokenRequestTransientError) as err:
+        except OAuth2TokenRequestError as err:
+            if mapped := cloud_error_for_status(err.status, err.headers):
+                raise mapped from err
+            if err.status == 401:
+                raise ConfigEntryAuthFailed(
+                    "SmartThings OAuth token refresh failed"
+                ) from err
             raise ConfigEntryNotReady(
                 "SmartThings OAuth token refresh failed temporarily"
             ) from err
-        except OAuth2TokenRequestError as err:
-            raise ConfigEntryAuthFailed(
-                "SmartThings OAuth token refresh failed"
+        except ClientError as err:
+            raise ConfigEntryNotReady(
+                "SmartThings OAuth token refresh failed temporarily"
             ) from err
 
         access_token = self.entry.data[CONF_TOKEN][CONF_ACCESS_TOKEN]

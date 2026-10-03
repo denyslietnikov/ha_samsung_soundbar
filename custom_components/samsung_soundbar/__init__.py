@@ -1,7 +1,10 @@
 import logging
+from types import SimpleNamespace
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_DEVICE_ID as CONF_HA_DEVICE_ID, CONF_TOKEN
+from homeassistant.const import CONF_DEVICE_ID as CONF_HA_DEVICE_ID
+from homeassistant.const import CONF_TOKEN
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -15,7 +18,11 @@ from homeassistant.exceptions import (
 )
 from homeassistant.helpers import (
     config_validation as cv,
+)
+from homeassistant.helpers import (
     device_registry as dr,
+)
+from homeassistant.helpers import (
     entity_registry as er,
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -24,32 +31,35 @@ from pysmartthings.exceptions import (
     SmartThingsConnectionError,
     SmartThingsError,
     SmartThingsForbiddenError,
+    SmartThingsRateLimitError,
 )
-import voluptuous as vol
 
+from .api_extension.smartthings_compat import (
+    SmartThingsDeviceCompat,
+    ensure_device_entity,
+)
 from .api_extension.SoundbarDevice import SoundbarDevice
-from .api_extension.smartthings_compat import ensure_device_entity
 from .auth import SmartThingsAuthProvider
+from .cloud_errors import CloudAccessError, normalize_cloud_error
+from .cloud_repairs import clear_cloud_issues, get_cloud_repairs
 from .const import (
     CONF_CONTROL_MODE,
     CONF_ENTRY_DEVICE_ID,
-    CONF_ENTRY_MAX_VOLUME,
     CONF_ENTRY_DEVICE_NAME,
+    CONF_ENTRY_MAX_VOLUME,
     CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
     CONF_ENTRY_SETTINGS_EQ_SELECTOR,
     CONF_ENTRY_SETTINGS_SOUNDMODE_SELECTOR,
     CONF_ENTRY_SETTINGS_WOOFER_NUMBER,
     CONF_EXECUTE_HREFS,
-    CONF_LOCAL_FALLBACK_TO_CLOUD,
-    CONF_LOCAL_HOST,
-    CONF_LOCAL_PORT,
     CONF_HREF,
     CONF_INCLUDE_EXECUTE_STATUS,
     CONF_INCLUDE_FLATTENED_STATUS,
     CONF_INCLUDE_NULL,
     CONF_INCLUDE_RAW_STATUS,
-    CONF_LOCAL_TIMEOUT,
-    CONF_LOCAL_VERIFY_SSL,
+    CONF_LOCAL_FALLBACK_TO_CLOUD,
+    CONF_LOCAL_HOST,
+    CONF_LOCAL_PORT,
     CONF_LOCAL_RPC_HOST,
     CONF_LOCAL_RPC_METHODS,
     CONF_LOCAL_RPC_PORT,
@@ -57,8 +67,11 @@ from .const import (
     CONF_LOCAL_RPC_VERIFY_SSL,
     CONF_LOCAL_RPC_WRITE_METHOD,
     CONF_LOCAL_RPC_WRITE_PARAMS,
+    CONF_LOCAL_TIMEOUT,
+    CONF_LOCAL_VERIFY_SSL,
     CONF_LOCATION_ID,
     CONF_PRESET,
+    CONF_SUBSCRIPTION_ID,
     CONF_WRITE_PROPERTY,
     CONF_WRITE_VALUE,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
@@ -70,8 +83,8 @@ from .const import (
     SERVICE_DUMP_LOCAL_RPC,
     SERVICE_DUMP_STATUS_SUMMARY,
 )
-from .device_info import async_unmerge_official_smartthings_device
 from .coordinator import SoundbarCoordinator
+from .device_info import async_unmerge_official_smartthings_device
 from .entry_options import get_entry_option
 from .local_device import LocalDevice
 from .local_rpc import (
@@ -139,20 +152,54 @@ DUMP_LOCAL_RPC_SCHEMA = vol.Schema(
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Report actionable Cloud failures without routing access refusals to reauth."""
+    try:
+        return await _async_setup_entry(hass, entry)
+    except (
+        ConfigEntryAuthFailed,
+        ConfigEntryNotReady,
+        CloudAccessError,
+        SmartThingsForbiddenError,
+        SmartThingsConnectionError,
+        SmartThingsRateLimitError,
+    ) as err:
+        error = normalize_cloud_error(err)
+        if get_entry_option(entry, CONF_CONTROL_MODE) != CONTROL_MODE_LOCAL_ONLY:
+            get_cloud_repairs(hass, entry).failed(error)
+        if isinstance(error, CloudAccessError):
+            raise ConfigEntryNotReady(str(error)) from err
+        if error is not err:
+            raise error from err
+        raise
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove Repairs belonging to an entry which the user deleted."""
+    clear_cloud_issues(hass, entry)
+
+
+async def _async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Samsung Soundbar from config entry."""
 
     _LOGGER.info("[%s] Setting up entry", DOMAIN)
     _async_remove_legacy_artwork_entity(hass, entry)
 
     if get_entry_option(entry, CONF_CONTROL_MODE) == CONTROL_MODE_LOCAL_ONLY:
+        clear_cloud_issues(hass, entry)
         return await _async_setup_local_only_entry(hass, entry)
 
-    if CONF_TOKEN not in entry.data:
+    control_mode = get_entry_option(entry, CONF_CONTROL_MODE)
+    hybrid = control_mode == CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS and bool(
+        get_entry_option(entry, CONF_LOCAL_HOST)
+    )
+    if CONF_TOKEN not in entry.data and not hybrid:
         raise ConfigEntryAuthFailed(
             "Legacy SmartThings PAT entries must be reauthenticated with OAuth"
         )
 
-    auth_provider = await SmartThingsAuthProvider.async_create(hass, entry)
+    auth_provider = await SmartThingsAuthProvider.async_create(
+        hass, entry, defer_auth=hybrid
+    )
     api = auth_provider.api
 
     if DOMAIN not in hass.data:
@@ -165,10 +212,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _async_register_services(hass)
 
     device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
-    control_mode = get_entry_option(entry, CONF_CONTROL_MODE)
 
     if device_id not in domain_config.devices:
-
+        cloud_setup_error = None
+        suggested_area = None
         try:
             _LOGGER.debug(
                 "[%s] Validating SmartThings authentication for device %s",
@@ -189,14 +236,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     entry,
                     data={**entry.data, CONF_LOCATION_ID: location_id},
                 )
-            suggested_area = None
             if smart_things_device.room_id:
                 try:
                     room = await api.get_room(
                         location_id,
                         smart_things_device.room_id,
                     )
-                except SmartThingsError as err:
+                except (SmartThingsError, HomeAssistantError) as err:
                     _LOGGER.debug(
                         "[%s] Could not load SmartThings room metadata for %s: %s",
                         DOMAIN,
@@ -209,29 +255,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except (
             SmartThingsAuthenticationFailedError,
             SmartThingsForbiddenError,
+            SmartThingsRateLimitError,
+            ConfigEntryAuthFailed,
+            ConfigEntryNotReady,
+            CloudAccessError,
+            SmartThingsConnectionError,
         ) as err:
-            _LOGGER.error(
-                "[%s] SmartThings authentication failed. "
-                "The token may have expired, been revoked, or lost access to "
-                "the configured soundbar.",
-                DOMAIN,
+            cloud_setup_error = normalize_cloud_error(err)
+            if isinstance(err, SmartThingsAuthenticationFailedError):
+                cloud_setup_error = ConfigEntryAuthFailed(
+                    "SmartThings authorization is no longer valid"
+                )
+            if isinstance(err, SmartThingsConnectionError):
+                cloud_setup_error = ConfigEntryNotReady(
+                    "SmartThings Cloud temporarily unavailable"
+                )
+            if not hybrid:
+                raise cloud_setup_error from err
+            # The existing entry ID is authoritative; no new physical identity is guessed.
+            smart_things_device = SmartThingsDeviceCompat(
+                api,
+                SimpleNamespace(
+                    device_id=device_id,
+                    location_id=entry.data.get(CONF_LOCATION_ID),
+                    room_id=None,
+                ),
             )
-
-            raise ConfigEntryAuthFailed(
-                "SmartThings authorization is no longer valid"
-            ) from err
-
-        except SmartThingsConnectionError as err:
-            _LOGGER.warning(
-                "[%s] SmartThings service is temporarily unavailable while "
-                "loading device %s: %s",
-                DOMAIN,
-                device_id,
-                err,
-            )
-            raise ConfigEntryNotReady(
-                "SmartThings service is temporarily unavailable"
-            ) from err
 
         except Exception:
             _LOGGER.exception(
@@ -281,11 +330,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         coordinator = SoundbarCoordinator(hass, entry, soundbar_device)
+        if cloud_setup_error is not None:
+            soundbar_device.cloud_setup_pending = True
+            coordinator.cloud_failed(cloud_setup_error)
         await coordinator.async_refresh()
 
         domain_config.devices[device_id] = DeviceConfig(
             entry.data,
             soundbar_device,
+            dict(entry.options),
         )
 
         _LOGGER.info("[%s] Device initialized successfully", DOMAIN)
@@ -293,12 +346,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_unmerge_official_smartthings_device(hass, entry, device_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    subscription = await async_setup_subscription(
-        hass,
-        entry,
-        api,
-        domain_config.devices[device_id].device,
-    )
+    subscription = None
+    if domain_config.devices[device_id].device.cloud_available:
+        subscription = await async_setup_subscription(
+            hass,
+            entry,
+            api,
+            domain_config.devices[device_id].device,
+        )
     if subscription is not None:
         domain_config.subscriptions[entry.entry_id] = subscription
 
@@ -334,6 +389,9 @@ async def _async_setup_local_only_entry(
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = SoundbarConfig(None, {})
     domain_config: SoundbarConfig = hass.data[DOMAIN]
+    if not domain_config.devices:
+        domain_config.api = None
+        domain_config.auth_provider = None
     _async_register_services(hass)
 
     if device_id not in domain_config.devices:
@@ -361,7 +419,9 @@ async def _async_setup_local_only_entry(
         )
         coordinator = SoundbarCoordinator(hass, entry, soundbar_device)
         await coordinator.async_refresh()
-        domain_config.devices[device_id] = DeviceConfig(entry.data, soundbar_device)
+        domain_config.devices[device_id] = DeviceConfig(
+            entry.data, soundbar_device, dict(entry.options)
+        )
 
     async_unmerge_official_smartthings_device(hass, entry, device_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -394,6 +454,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    runtime = hass.data.get(DOMAIN)
+    configured = (
+        runtime.devices.get(entry.data.get(CONF_ENTRY_DEVICE_ID)) if runtime else None
+    )
+    if configured is not None and configured.options is not None:
+        ignored = {CONF_TOKEN, CONF_SUBSCRIPTION_ID}
+        before = {
+            key: value for key, value in configured.config.items() if key not in ignored
+        }
+        after = {key: value for key, value in entry.data.items() if key not in ignored}
+        if before == after and configured.options == entry.options:
+            return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

@@ -1,4 +1,101 @@
 {
+    "issues": {
+        "cloud_auth": {
+            "title": "SmartThings-Autorisierung erforderlich",
+            "description": "Die SmartThings-Autorisierung für {name} fehlt, ist abgelaufen oder wurde widerrufen. Verbinden Sie das Konto erneut oder wechseln Sie diesen Eintrag zu Local only. Erreichbare LAN-Steuerungen in Hybrid funktionieren weiterhin; reine Cloud-Steuerungen sind nicht verfügbar.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Cloud-Problem beheben",
+                        "description": "Öffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
+                        "data": {
+                            "action": "Aktion"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
+                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
+                }
+            }
+        },
+        "cloud_access": {
+            "title": "SmartThings Cloud verweigert den Zugriff",
+            "description": "SmartThings verweigert den API-Zugriff für {name} (HTTP 403). Prüfen Sie App-Berechtigungen und Gerätezugriff. Diese Antwort allein beweist nicht, dass ein kostenpflichtiges Abonnement erforderlich ist. Eine erneute Autorisierung startet nicht automatisch. Sie können diesen Eintrag zu Local only wechseln.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Cloud-Problem beheben",
+                        "description": "Öffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
+                        "data": {
+                            "action": "Aktion"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
+                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
+                }
+            }
+        },
+        "cloud_payment": {
+            "title": "SmartThings Cloud verlangt eine Zahlung",
+            "description": "SmartThings hat HTTP 402 für {name} zurückgegeben. Prüfen Sie den API-Tarif Ihres Kontos oder wechseln Sie diesen Eintrag zu Local only. Eine erneute OAuth-Autorisierung behebt diese Antwort nicht. Erreichbare LAN-Steuerungen in Hybrid bleiben verfügbar.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Cloud-Problem beheben",
+                        "description": "Öffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
+                        "data": {
+                            "action": "Aktion"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
+                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
+                }
+            }
+        },
+        "cloud_limit": {
+            "title": "SmartThings Cloud-Anfragelimit erreicht",
+            "description": "SmartThings hat HTTP 429 für {name} zurückgegeben. Cloud-Abfragen pausieren vor dem nächsten Versuch. Es kann ein Anfragelimit oder eine Quote sein, nicht zwingend eine Zahlungspflicht. Behalten Sie Hybrid bis zur Wiederherstellung oder wechseln Sie zu Local only. Erreichbare LAN-Steuerungen bleiben verfügbar.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Cloud-Problem beheben",
+                        "description": "Öffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
+                        "data": {
+                            "action": "Aktion"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
+                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
+                }
+            }
+        },
+        "cloud_unavailable": {
+            "title": "SmartThings Cloud vorübergehend nicht erreichbar",
+            "description": "Cloud-Anfragen für {name} sind wiederholt fehlgeschlagen. Home Assistant versucht es erneut. Prüfen Sie die Internetverbindung oder warten Sie auf SmartThings; eine erneute Autorisierung ist bei einem vorübergehenden Ausfall nicht erforderlich. Sie können diesen Eintrag zu Local only wechseln. Erreichbare LAN-Steuerungen in Hybrid bleiben verfügbar.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Cloud-Problem beheben",
+                        "description": "Öffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
+                        "data": {
+                            "action": "Aktion"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
+                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
+                }
+            }
+        }
+    },
     "application_credentials": {
         "description": "Erstelle eine SmartThings OAuth-In App mit der SmartThings CLI. Füge diese Redirect URI exakt hinzu: `{redirect_uri}`. Nutze die Scopes `r:devices:*`, `x:devices:*` und `r:locations:*`. Füge `sse` nicht hinzu: SmartThings stellt diesen Scope benutzerdefinierten OAuth-In Apps nicht bereit. Trage danach die erzeugte Client ID und das Client Secret hier ein. [SmartThings CLI Dokumentation]({console_url})"
     },
@@ -101,6 +198,12 @@
         }
     },
     "selector": {
+        "cloud_repair_action": {
+            "options": {
+                "options": "Steuerungsmodus-Optionen öffnen",
+                "reauth": "SmartThings-Konto erneut verbinden"
+            }
+        },
         "soundmode": {
             "options": {
                 "standard": "Standard",

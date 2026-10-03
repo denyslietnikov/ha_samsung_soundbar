@@ -10,6 +10,7 @@ from .api_extension.SoundbarDevice import SoundbarDevice
 class DeviceConfig:
     config: dict
     device: SoundbarDevice
+    options: dict | None = None
 
 
 @dataclass

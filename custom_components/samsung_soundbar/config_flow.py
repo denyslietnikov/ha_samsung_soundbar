@@ -554,9 +554,13 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                 for key, value in self.config_entry.data.items()
                 if key not in cloud_keys
             }
-            self.hass.config_entries.async_update_entry(
+            changed = self.hass.config_entries.async_update_entry(
                 self.config_entry, data=new_data, options=options
             )
+            if changed and not getattr(self.config_entry, "update_listeners", ()):
+                self.hass.config_entries.async_schedule_reload(
+                    self.config_entry.entry_id
+                )
         return self.async_create_entry(title="", data=options)
 
     async def _async_validate_local_rpc(self, options: dict[str, Any]) -> None:

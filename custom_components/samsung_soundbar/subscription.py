@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_TOKEN, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from pysmartthings import DeviceEvent, DeviceHealthEvent, Lifecycle, SmartThings
 from pysmartthings.exceptions import SmartThingsError
 from pysmartthings.models import HealthStatus
@@ -125,7 +126,7 @@ async def async_setup_subscription(
 
     try:
         health = await client.get_device_health(device.device_id)
-    except SmartThingsError as err:
+    except (SmartThingsError, HomeAssistantError) as err:
         _LOGGER.debug(
             "Could not read initial SmartThings health for %s: %s",
             device.device_name,
@@ -140,7 +141,7 @@ async def async_setup_subscription(
     if old_subscription_id is not None:
         try:
             await client.delete_subscription(old_subscription_id)
-        except SmartThingsError as err:
+        except (SmartThingsError, HomeAssistantError) as err:
             _LOGGER.warning(
                 "Could not delete previous SmartThings subscription for %s; "
                 "polling remains active: %s",
@@ -154,7 +155,7 @@ async def async_setup_subscription(
             location_id,
             installed_app_id,
         )
-    except SmartThingsError as err:
+    except (SmartThingsError, HomeAssistantError) as err:
         _LOGGER.warning(
             "Could not enable SmartThings push updates for %s; polling remains "
             "active: %s",
@@ -203,7 +204,7 @@ async def async_remove_subscription(
             return
         try:
             await runtime.client.delete_subscription(subscription_id)
-        except SmartThingsError as err:
+        except (SmartThingsError, HomeAssistantError) as err:
             _LOGGER.debug(
                 "Could not delete SmartThings subscription %s during unload: %s",
                 subscription_id,

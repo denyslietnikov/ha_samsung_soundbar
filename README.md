@@ -147,6 +147,24 @@ firmware.
 
 ## Diagnostics
 
+Cloud problems appear under **Settings > System > Repairs**, separately for
+each soundbar. Authorization failures offer **Reconnect SmartThings account**;
+access denied (403), payment required (402), quota/rate limit (429), and repeated
+temporary outages have their own messages. A generic 403 is not proof that a
+subscription is required, and these non-auth failures do not trigger reauth.
+
+**Open control mode options** opens the existing entry's Options. Switching to
+Local only verifies the host and saved identity before removing OAuth data;
+device and entity IDs are retained. Opening or cancelling a flow does not
+resolve the issue: it clears after successful Cloud recovery, switching to
+Local only, or deleting that entry. Reachable LAN controls in Hybrid continue
+to work during a Cloud failure; cloud-only controls become unavailable.
+
+Cloud polling backs off for access failures and respects numeric `Retry-After`
+on 429 (15-3600 seconds; 60 seconds if absent or invalid). Forced coordinator
+refreshes also respect this cooldown. A 401 gets at most one token refresh
+and retry per request. Routine token rotation does not reload the integration.
+
 Each entry uses one shared Home Assistant state coordinator. Local core state
 is polled every 2 seconds; cloud state every 15 seconds; full local status every
 60 seconds. Entities do not run their own network polls. Fresh local fields take
@@ -214,6 +232,25 @@ explicit diagnostic calls still read it directly. It is never a device identity.
   Assistant entity; the integration also requires reliable state readback.
 - SmartThings Cloud features require valid OAuth credentials and remain subject
   to Samsung API availability and policy.
+
+## Development Tests
+
+Use Python 3.14 in a separate virtual environment:
+
+```sh
+python3.14 -m venv .venv
+.venv/bin/python -m pip install -r requirements-test.txt
+.venv/bin/python -m unittest discover -s tests -q
+.venv/bin/python -m pytest tests/ha -q
+```
+
+The pinned HA harness runs Home Assistant 2026.9.4. Tests in `tests/ha` use the
+real config-entry manager, entity/device registries, platforms, service calls,
+Repairs, Options and reauth flows. Only external OAuth, SmartThings and LAN
+transports are replaced; network access is blocked. They cover setup,
+reload/unload, external state updates, readback, DHCP recovery, Cloud failures,
+and Local-only migration without changing IDs. They do not replace field-tests
+on a Q800F. GitHub Actions runs both suites on pushes and pull requests.
 
 ## Attribution
 

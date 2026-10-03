@@ -12,8 +12,14 @@ from homeassistant.exceptions import (
     HomeAssistantError,
 )
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from pysmartthings.exceptions import SmartThingsConnectionError
+from pysmartthings.exceptions import (
+    SmartThingsConnectionError,
+    SmartThingsForbiddenError,
+    SmartThingsRateLimitError,
+)
 
+from .cloud_errors import CloudAccessError, CloudRateLimitError
+from .cloud_repairs import get_cloud_repairs
 from .local_rpc import LocalRpcError
 from .state import SoundbarState, StateSnapshot
 
@@ -64,8 +70,10 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         self._write_lock = asyncio.Lock()
         self._command_task = None
         self._next_cloud = 0.0
+        self._cloud_retry_until = 0.0
         self._next_full_local = 0.0
         self._reauth_started = False
+        self.cloud_repairs = get_cloud_repairs(hass, entry)
         self._batching = False
         self._last_cycle_finished = float("-inf")
         self._force_refresh = False
@@ -113,29 +121,47 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
                     and now >= self._next_cloud
                 ):
                     await self._refresh_cloud()
-                    self._next_cloud = self._clock() + CLOUD_INTERVAL.total_seconds()
                 return self.state.snapshot()
             finally:
                 self._batching = False
                 self._last_cycle_finished = monotonic()
 
-    async def _refresh_cloud(self):
+    async def _refresh_cloud(self, *, force=False):
+        if (
+            self._reauth_started
+            or self._clock() < self._cloud_retry_until
+            or (not force and self._clock() < self._next_cloud)
+        ):
+            return
         try:
             await self.device.update_cloud_status()
-        except ConfigEntryAuthFailed:
-            self.device.handle_smartthings_availability(False)
-            if self.device.local_only:
-                raise
-            if not self._reauth_started:
-                self._reauth_started = True
-                self.config_entry.async_start_reauth(self.hass)
+        except ConfigEntryAuthFailed as err:
+            self.cloud_failed(err)
         except (
             ConfigEntryNotReady,
             SmartThingsConnectionError,
+            SmartThingsForbiddenError,
+            SmartThingsRateLimitError,
             HomeAssistantError,
         ) as err:
-            self.device.handle_smartthings_availability(False)
-            LOGGER.debug("Cloud soundbar refresh failed: %s", err)
+            self.cloud_failed(err)
+        else:
+            self.cloud_repairs.recovered()
+            self._cloud_retry_until = 0.0
+            self._next_cloud = self._clock() + CLOUD_INTERVAL.total_seconds()
+            if getattr(self.device, "cloud_setup_pending", False):
+                self.device.cloud_setup_pending = False
+                self.hass.config_entries.async_schedule_reload(
+                    self.config_entry.entry_id
+                )
+
+    def cloud_failed(self, error):
+        self.device.handle_smartthings_availability(False)
+        self._next_cloud = self._clock() + self.cloud_repairs.failed(error)
+        self._cloud_retry_until = self._next_cloud
+        if isinstance(error, ConfigEntryAuthFailed) and not self._reauth_started:
+            self._reauth_started = True
+            self.config_entry.async_start_reauth(self.hass)
 
     async def async_refresh_all(self):
         """Force both configured tiers for an explicit diagnostic snapshot."""
@@ -162,8 +188,15 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
                 ):
                     await self._read_after_write(set(expected) | set(read_fields))
                 elif not self.device.local_only:
-                    await self._refresh_cloud()
+                    await self._refresh_cloud(force=True)
                 return result
+            except (
+                CloudAccessError,
+                CloudRateLimitError,
+                ConfigEntryAuthFailed,
+            ) as err:
+                self.cloud_failed(err)
+                raise
             finally:
                 self._command_task = None
                 self._batching = False

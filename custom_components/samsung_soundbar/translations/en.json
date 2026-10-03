@@ -1,4 +1,101 @@
 {
+    "issues": {
+        "cloud_auth": {
+            "title": "SmartThings authorization needs attention",
+            "description": "SmartThings authorization for {name} is missing, expired or revoked. Reconnect the account, or switch this existing entry to Local only. In Hybrid, reachable LAN controls continue to work; cloud-only controls are unavailable.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Choose how to resolve the Cloud issue",
+                        "description": "For {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
+                        "data": {
+                            "action": "Action"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
+                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
+                }
+            }
+        },
+        "cloud_access": {
+            "title": "SmartThings Cloud denied access",
+            "description": "SmartThings denied API access for {name} (HTTP 403). Check the app permissions and device access. This response alone does not prove that a paid subscription is required. Reauth is not started automatically. You can switch this existing entry to Local only.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Choose how to resolve the Cloud issue",
+                        "description": "For {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
+                        "data": {
+                            "action": "Action"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
+                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
+                }
+            }
+        },
+        "cloud_payment": {
+            "title": "SmartThings Cloud requires payment",
+            "description": "SmartThings returned HTTP 402 for {name}. Check the API plan for your account, or switch this existing entry to Local only. OAuth reauthentication will not resolve this response. Reachable LAN controls in Hybrid remain available.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Choose how to resolve the Cloud issue",
+                        "description": "For {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
+                        "data": {
+                            "action": "Action"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
+                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
+                }
+            }
+        },
+        "cloud_limit": {
+            "title": "SmartThings Cloud request limit reached",
+            "description": "SmartThings returned HTTP 429 for {name}. Cloud polling pauses before retrying; this may be a rate limit or a quota, not necessarily a billing requirement. You can keep Hybrid while it recovers, or switch to Local only. Reachable LAN controls remain available.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Choose how to resolve the Cloud issue",
+                        "description": "For {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
+                        "data": {
+                            "action": "Action"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
+                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
+                }
+            }
+        },
+        "cloud_unavailable": {
+            "title": "SmartThings Cloud is temporarily unavailable",
+            "description": "Cloud requests for {name} have failed repeatedly. Home Assistant will retry. Check the internet connection or wait for SmartThings to recover; reauthentication is not required for a temporary outage. You can switch this existing entry to Local only. Reachable LAN controls in Hybrid remain available.",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Choose how to resolve the Cloud issue",
+                        "description": "For {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
+                        "data": {
+                            "action": "Action"
+                        }
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
+                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
+                }
+            }
+        }
+    },
     "application_credentials": {
         "description": "Create a SmartThings OAuth-In App with the SmartThings CLI. Add this redirect URI exactly: `{redirect_uri}`. Use scopes `r:devices:*`, `x:devices:*`, and `r:locations:*`. Do not add `sse`: SmartThings does not expose it to user-created OAuth-In apps. Then enter the generated client ID and client secret here. [SmartThings CLI documentation]({console_url})"
     },
@@ -101,6 +198,12 @@
         }
     },
     "selector": {
+        "cloud_repair_action": {
+            "options": {
+                "options": "Open control mode options",
+                "reauth": "Reconnect SmartThings account"
+            }
+        },
         "soundmode": {
             "options": {
                 "standard": "Standard",

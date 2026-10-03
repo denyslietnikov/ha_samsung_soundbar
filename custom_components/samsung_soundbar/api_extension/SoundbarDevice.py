@@ -1,9 +1,9 @@
 import asyncio
-from collections.abc import Awaitable, Callable, Iterable
 import datetime
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable, Iterable
 from time import time
 from typing import Any, TypeVar
 
@@ -19,22 +19,24 @@ from pysmartthings.exceptions import (
     SmartThingsCommandError,
     SmartThingsConnectionError,
     SmartThingsForbiddenError,
+    SmartThingsRateLimitError,
 )
 
-from .const import SpeakerIdentifier, RearSpeakerMode
+from ..cloud_errors import cloud_error_for_status, normalize_cloud_error
 from ..const import (
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
     CONTROL_MODE_LOCAL_ONLY,
     CONTROL_MODE_SMARTTHINGS_CLOUD,
     DOMAIN,
 )
+from ..coordinator import coordinated_command
 from ..local_rpc import (
     LOCAL_SOUND_MODE_VALUES,
     LocalRpcCommandError,
     LocalRpcError,
     LocalSoundbarRpcClient,
 )
-from ..coordinator import coordinated_command
+from .const import RearSpeakerMode, SpeakerIdentifier
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +61,7 @@ CLOUD_FIELD_CAPABILITIES = {
 }
 
 _T = TypeVar("_T")
-_AUTH_ERROR_STATUSES = {401, 403}
+_AUTH_ERROR_STATUSES = {401}
 _TRANSIENT_ERROR_STATUSES = {
     408,
     429,
@@ -192,6 +194,7 @@ class SoundbarDevice:
     ):
         self.device = device
         self.coordinator = None
+        self.cloud_setup_pending = False
         self._device_id = self.device.device_id
         self.__auth_provider = auth_provider
         self.__session = session
@@ -304,43 +307,31 @@ class SoundbarDevice:
         action: Callable[[], Awaitable[_T]],
         description: str,
     ) -> _T:
-        """Call SmartThings once, refresh auth on 401/403, then fail for reauth."""
+        """Retry a 401 once; permission and quota errors never refresh OAuth."""
         if self.local_only:
             raise HomeAssistantError("SmartThings is disabled in Local-only mode")
-        try:
-            return await action()
-        except (
-            SmartThingsAuthenticationFailedError,
-            SmartThingsForbiddenError,
-        ) as err:
-            if self.__auth_provider is not None:
-                log.debug(
-                    "[%s] SmartThings auth failed during %s; forcing token refresh",
-                    DOMAIN,
-                    description,
-                )
-                await self.__auth_provider.async_get_access_token(force_refresh=True)
-                try:
-                    return await action()
-                except (
-                    SmartThingsAuthenticationFailedError,
-                    SmartThingsForbiddenError,
-                ) as retry_err:
-                    raise ConfigEntryAuthFailed(
-                        "SmartThings authorization is no longer valid"
-                    ) from retry_err
-
-            raise ConfigEntryAuthFailed(
-                "SmartThings authorization is no longer valid"
-            ) from err
-        except SmartThingsConnectionError as err:
-            raise ConfigEntryNotReady(
-                "SmartThings service is temporarily unavailable"
-            ) from err
-        except SmartThingsCommandError as err:
-            raise HomeAssistantError(
-                f"SmartThings rejected {description}: {err}"
-            ) from err
+        for attempt in range(2):
+            try:
+                return await action()
+            except SmartThingsAuthenticationFailedError as err:
+                if attempt == 0 and self.__auth_provider is not None:
+                    await self.__auth_provider.async_get_access_token(
+                        force_refresh=True
+                    )
+                    continue
+                raise ConfigEntryAuthFailed(
+                    "SmartThings authorization is no longer valid"
+                ) from err
+            except (SmartThingsForbiddenError, SmartThingsRateLimitError) as err:
+                raise normalize_cloud_error(err) from err
+            except SmartThingsConnectionError as err:
+                raise ConfigEntryNotReady(
+                    "SmartThings service is temporarily unavailable"
+                ) from err
+            except SmartThingsCommandError as err:
+                raise HomeAssistantError(
+                    f"SmartThings rejected {description}: {err}"
+                ) from err
 
     @property
     def hybrid_mode(self) -> bool:
@@ -366,6 +357,12 @@ class SoundbarDevice:
         if self.coordinator is not None:
             return self.coordinator.state.snapshot().available
         return self.__cloud_available or (self.hybrid_mode and self.__local_available)
+
+    @property
+    def cloud_available(self) -> bool:
+        if self.coordinator is not None:
+            return self.coordinator.state.snapshot().cloud_available
+        return self.__cloud_available
 
     def add_update_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
         """Add a listener notified after push updates."""
@@ -2554,7 +2551,11 @@ class SoundbarDevice:
             json=request_body,
         )
 
-        if resp.status in _AUTH_ERROR_STATUSES and self.__auth_provider is not None:
+        if (
+            resp.status in _AUTH_ERROR_STATUSES
+            and self.__auth_provider is not None
+            and not force_refresh
+        ):
             resp.release()
             return await self.__post_execute_command_raw(arguments, force_refresh=True)
 
@@ -2563,6 +2564,10 @@ class SoundbarDevice:
             raise ConfigEntryAuthFailed(
                 "SmartThings authorization is no longer valid"
             )
+
+        if error := cloud_error_for_status(resp.status, resp.headers):
+            resp.release()
+            raise error
 
         if resp.status in _TRANSIENT_ERROR_STATUSES:
             status = resp.status
@@ -2703,6 +2708,8 @@ class SoundbarDevice:
     def __raise_for_http_status(err: ClientResponseError) -> None:
         """Map SmartThings HTTP errors to Home Assistant config-entry errors."""
         status = err.status
+        if error := cloud_error_for_status(status, err.headers):
+            raise error from err
         if status in _AUTH_ERROR_STATUSES:
             raise ConfigEntryAuthFailed(
                 "SmartThings authorization is no longer valid"
@@ -2722,7 +2729,11 @@ class SoundbarDevice:
         request_headers = await self.__auth_headers(force_refresh=force_refresh)
         resp = await self.__session.get(url, headers=request_headers)
 
-        if resp.status in _AUTH_ERROR_STATUSES and self.__auth_provider is not None:
+        if (
+            resp.status in _AUTH_ERROR_STATUSES
+            and self.__auth_provider is not None
+            and not force_refresh
+        ):
             resp.release()
             return await self.__get_status_response(url, force_refresh=True)
 
@@ -2731,6 +2742,10 @@ class SoundbarDevice:
             raise ConfigEntryAuthFailed(
                 "SmartThings authorization is no longer valid"
             )
+
+        if error := cloud_error_for_status(resp.status, resp.headers):
+            resp.release()
+            raise error
 
         if resp.status in _TRANSIENT_ERROR_STATUSES:
             status = resp.status
