@@ -345,7 +345,7 @@ async def test_cloud_repair_translations_are_available_to_ha(
         translated = await async_get_translations(hass, language, "issues", {DOMAIN})
         prefix = f"component.{DOMAIN}.issues.cloud_access"
         assert translated[f"{prefix}.title"]
-        assert "403" in translated[f"{prefix}.description"]
+        assert "403" in translated[f"{prefix}.fix_flow.step.choose.description"]
         assert translated[f"{prefix}.fix_flow.step.choose.data.action"]
 
 

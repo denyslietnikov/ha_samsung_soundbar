@@ -3,8 +3,9 @@ select_soundmode:
   name: Select Soundmode
   description: Some Soundbars support different "sound modes". If supported you can select them here.
   target:
-    device:
+    entity:
       integration: samsung_soundbar
+      domain: media_player
   fields:
     sound_mode:
       name: Sound Mode
@@ -17,19 +18,23 @@ select_soundmode:
       # the input UI for this field
       selector:
         select:
-          translation_key: "soundmode"
           options:
-            - "standard"
-            - "surround"
-            - "game"
-            - "adaptive sound"
+            - value: standard
+              label: Standard
+            - value: surround
+              label: Surround
+            - value: game
+              label: Gaming
+            - value: adaptive sound
+              label: Adaptive Sound
 
 set_woofer_level:
   name: Set Woofer level
   description: Set the subwoofer level of your soundbar
   target:
-    device:
+    entity:
       integration: samsung_soundbar
+      domain: media_player
   fields:
     level:
       name: Volume level
@@ -46,8 +51,9 @@ set_night_mode:
   name: Set NightMode
   description: Activates / deactivates the Nightmode
   target:
-    device:
+    entity:
       integration: samsung_soundbar
+      domain: media_player
   fields:
     enabled:
       name: Enabled / Disabled
@@ -61,8 +67,9 @@ set_bass_enhancer:
   name: Set bass enhancement
   description: Activates / deactivates the bass enhancement
   target:
-    device:
+    entity:
       integration: samsung_soundbar
+      domain: media_player
   fields:
     enabled:
       name: Enabled / Disabled
@@ -76,8 +83,9 @@ set_voice_enhancer:
   name: Set voice enhancement
   description: Activates / deactivates the voice enhancement
   target:
-    device:
+    entity:
       integration: samsung_soundbar
+      domain: media_player
   fields:
     enabled:
       name: Enabled / Disabled
@@ -91,8 +99,9 @@ set_speaker_level:
   name: Set Speaker level
   description: Set the speaker levels of your soundbar
   target:
-    device:
+    entity:
       integration: samsung_soundbar
+      domain: media_player
   fields:
     speaker_identifier:
       name: Speaker Identifier
@@ -100,14 +109,19 @@ set_speaker_level:
       example: Spk_Center
       selector:
         select:
-          translation_key: "speaker_identifier"
           options:
-            - "Spk_Center"
-            - "Spk_Side"
-            - "Spk_Wide"
-            - "Spk_Front_Top"
-            - "Spk_Rear"
-            - "Spk_Rear_Top"
+            - value: Spk_Center
+              label: Center
+            - value: Spk_Side
+              label: Side
+            - value: Spk_Wide
+              label: Wide
+            - value: Spk_Front_Top
+              label: Front Top
+            - value: Spk_Rear
+              label: Rear
+            - value: Spk_Rear_Top
+              label: Rear Top
     level:
       name: Speaker Level
       required: true
@@ -122,8 +136,9 @@ set_rear_speaker_mode:
   name: Set rear speaker mode
   description: Set the rear speaker mode of your soundbar
   target:
-    device:
+    entity:
       integration: samsung_soundbar
+      domain: media_player
   fields:
     speaker_mode:
       name: Speaker mode
@@ -131,17 +146,19 @@ set_rear_speaker_mode:
       example: Rear
       selector:
         select:
-          translation_key: "rear_speaker_mode"
           options:
-            - "Rear"
-            - "Front"
+            - value: Rear
+              label: Rear
+            - value: Front
+              label: Front
 
 set_active_voice_amplifier:
   name: Set active voice amplifier
   description: Activates / deactivates the active voice amplifier
   target:
-    device:
+    entity:
       integration: samsung_soundbar
+      domain: media_player
   fields:
     enabled:
       name: Enabled / Disabled
@@ -155,8 +172,9 @@ set_space_fit_sound:
   name: Set SpaceFitSound
   description: Activates / deactivates the SpaceFitSound
   target:
-    device:
+    entity:
       integration: samsung_soundbar
+      domain: media_player
   fields:
     enabled:
       name: Enabled / Disabled
