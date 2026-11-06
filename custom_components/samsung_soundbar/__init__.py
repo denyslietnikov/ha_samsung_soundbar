@@ -99,7 +99,7 @@ from .subscription import async_remove_subscription, async_setup_subscription
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "switch", "number", "select", "sensor"]
+PLATFORMS = ["media_player", "switch", "number", "select", "sensor", "button"]
 
 DUMP_EXECUTE_PAYLOAD_SCHEMA = vol.Schema(
     {
@@ -676,7 +676,7 @@ def _async_create_dump_local_rpc_service(hass: HomeAssistant):
                     "state_change_observed": before is not None
                     and after is not None
                     and before != after,
-                    "runtime_enabled": False,
+                    "runtime_configuration_changed": False,
                 }
 
         return result

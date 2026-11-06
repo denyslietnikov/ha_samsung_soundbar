@@ -28,7 +28,7 @@ async def test_local_only_setup_reload_and_unload_preserve_ids(hass, entry, tran
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.LOADED
     before = registered(hass, entry)
-    assert len(before) == 5  # media player, two selects, two sensors
+    assert len(before) == 7  # media player, two selects, two sensors, two Woofer buttons
     player_id = next(
         entity_id
         for entity_id, _ in before.values()
@@ -163,6 +163,6 @@ async def test_new_local_only_flow_creates_loaded_entry_without_oauth(hass, tran
     assert new_entry.state is ConfigEntryState.LOADED
     assert new_entry.data[CONF_CONTROL_MODE] == CONTROL_MODE_LOCAL_ONLY
     assert "token" not in new_entry.data
-    assert len(registered(hass, new_entry)) == 5
+    assert len(registered(hass, new_entry)) == 7
     transports.auth.assert_not_awaited()
     transports.api.get_device.assert_not_awaited()

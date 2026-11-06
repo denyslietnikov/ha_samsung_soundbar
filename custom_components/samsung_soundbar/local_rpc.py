@@ -11,6 +11,8 @@ DEFAULT_LOCAL_RPC_TIMEOUT = 8
 MAX_VOLUME_COMMANDS = 200
 MAX_VOLUME_UNCHANGED_READBACKS = 3
 VOLUME_ADJUSTMENT_TIMEOUT = 60
+POWER_CONFIRMATION_ATTEMPTS = 5
+POWER_CONFIRMATION_INTERVAL = 0.5
 DEFAULT_LOCAL_RPC_METHODS = (
     "powerControl",
     "getVolume",
@@ -40,8 +42,20 @@ class LocalRpcAuthError(LocalRpcError):
     """Raised when the local soundbar rejects the access token."""
 
 
+class LocalRpcTransportError(LocalRpcError):
+    """The LAN transport failed, rather than one readable field."""
+
+
+class LocalRpcFieldError(LocalRpcError):
+    """A getter returned an invalid field value over a working transport."""
+
+
 class LocalRpcCommandError(LocalRpcError):
     """Raised when a reachable soundbar rejects or cannot complete a command."""
+
+
+class LocalRpcWriteUncertainError(LocalRpcCommandError, LocalRpcTransportError):
+    """A write may have reached the device; never retry via another transport."""
 
 
 class LocalRpcMethodNotFoundError(LocalRpcCommandError):
@@ -50,6 +64,28 @@ class LocalRpcMethodNotFoundError(LocalRpcCommandError):
 
 class LocalRpcParseError(LocalRpcCommandError):
     """Parse error is not proof of rejected authentication on every model."""
+
+
+def split_local_readback(values: dict[str, Any], *, require_power: bool = False):
+    """Keep field failures separate from transport/authentication failures."""
+    readback, errors = {}, {}
+    for key, value in values.items():
+        if isinstance(value, BaseException):
+            if (
+                key == "power"
+                or not isinstance(value, (LocalRpcCommandError, LocalRpcFieldError))
+                or isinstance(
+                    value,
+                    (LocalRpcAuthError, LocalRpcParseError, LocalRpcTransportError),
+                )
+            ):
+                raise value
+            errors[key] = str(value)
+            value = None
+        readback[key] = value
+    if require_power and readback.get("power") not in ("powerOn", "powerOff"):
+        raise LocalRpcError("powerControl did not return a valid power state")
+    return readback, errors
 
 
 class LocalSoundbarRpcClient:
@@ -72,9 +108,13 @@ class LocalSoundbarRpcClient:
         self._token_lock = asyncio.Lock()
         self._call_lock = asyncio.Lock()
         self._volume_lock = asyncio.Lock()
+        self._mute_lock = asyncio.Lock()
+        self._volume_control_supported = True
+        self._mute_control_supported = True
         self._request_id = 0
         self._identifier: str | None = None
         self._identifier_confirmations = 0
+        self.status_errors: dict[str, str] = {}
 
     @property
     def token_length(self) -> int | None:
@@ -97,7 +137,9 @@ class LocalSoundbarRpcClient:
                     data = await response.json(content_type=None)
         except ClientResponseError as err:
             error_type = (
-                LocalRpcAuthError if err.status in (401, 403) else LocalRpcError
+                LocalRpcAuthError
+                if err.status in (401, 403)
+                else LocalRpcTransportError
             )
             raise error_type(
                 self._sanitize_error(
@@ -105,7 +147,7 @@ class LocalSoundbarRpcClient:
                 )
             ) from err
         except (ClientError, asyncio.TimeoutError) as err:
-            raise LocalRpcError(
+            raise LocalRpcTransportError(
                 self._sanitize_error(str(err) or "request timed out", payload)
             ) from err
         except json.JSONDecodeError as err:
@@ -216,24 +258,54 @@ class LocalSoundbarRpcClient:
             request_params.setdefault("AccessToken", self._token)
 
         try:
-            return await self._post(self._payload(method, request_params))
-        except LocalRpcAuthError:
+            return await self._request_once(method, request_params)
+        except (LocalRpcAuthError, LocalRpcParseError) as err:
             if not authenticated:
                 raise
             self._token = None
+            if method == "remoteKeyControl":
+                raise
+            if isinstance(err, LocalRpcParseError) and (
+                method not in DEFAULT_LOCAL_RPC_METHODS
+                or set(request_params) - {"AccessToken"}
+            ):
+                # Q800F reports stale tokens as parse errors, but an ambiguous
+                # write must never be replayed. The next read can reauthenticate.
+                raise
             await self.create_token()
             request_params["AccessToken"] = self._token
             try:
-                return await self._post(self._payload(method, request_params))
-            except LocalRpcAuthError:
+                return await self._request_once(method, request_params)
+            except (LocalRpcAuthError, LocalRpcParseError):
                 self._token = None
                 raise
 
+    async def _request_once(
+        self, method: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        try:
+            return await self._post(self._payload(method, params))
+        except LocalRpcError as err:
+            if not isinstance(err, (LocalRpcCommandError, LocalRpcAuthError)) and (
+                method not in DEFAULT_LOCAL_RPC_METHODS or set(params) - {"AccessToken"}
+            ):
+                raise LocalRpcWriteUncertainError(str(err), code=err.code) from err
+            raise
+
     async def power_on(self) -> None:
-        await self.call("powerControl", {"power": "powerOn"})
+        await self._set_power("powerOn")
 
     async def power_off(self) -> None:
-        await self.call("powerControl", {"power": "powerOff"})
+        await self._set_power("powerOff")
+
+    async def _set_power(self, target: str) -> None:
+        await self.call("powerControl", {"power": target})
+        for attempt in range(POWER_CONFIRMATION_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(POWER_CONFIRMATION_INTERVAL)
+            if await self.power_state() == target:
+                return
+        raise LocalRpcCommandError(f"{target} not confirmed by local readback")
 
     async def remote_key(self, remote_key: str) -> None:
         await self.call("remoteKeyControl", {"remoteKey": remote_key})
@@ -249,6 +321,19 @@ class LocalSoundbarRpcClient:
     async def mute_toggle(self) -> None:
         await self.remote_key("MUTE")
 
+    async def set_mute(self, mute: bool) -> None:
+        if not isinstance(mute, bool):
+            raise TypeError("Mute must be a boolean")
+        async with self._mute_lock:
+            if self._mute_control_supported:
+                try:
+                    await self.call("muteControl", {"mute": mute})
+                    return
+                except LocalRpcMethodNotFoundError:
+                    self._mute_control_supported = False
+            if await self.is_muted() != mute:
+                await self.mute_toggle()
+
     async def set_volume(self, level: int) -> None:
         if (
             isinstance(level, bool)
@@ -258,6 +343,12 @@ class LocalSoundbarRpcClient:
             raise ValueError("Volume has to be in range 0-100")
 
         async with self._volume_lock:
+            if self._volume_control_supported:
+                try:
+                    await self.call("volumeControl", {"volume": level})
+                    return
+                except LocalRpcMethodNotFoundError:
+                    self._volume_control_supported = False
             try:
                 await self.call("setVolume", {"volume": level})
                 return
@@ -297,7 +388,9 @@ class LocalSoundbarRpcClient:
 
     async def power_state(self) -> str | None:
         value = (await self.call("powerControl")).get("power")
-        return str(value) if value is not None else None
+        if value not in ("powerOn", "powerOff"):
+            raise LocalRpcError("powerControl did not return a valid power state")
+        return value
 
     async def volume(self) -> int:
         async with self._volume_lock:
@@ -310,13 +403,13 @@ class LocalSoundbarRpcClient:
     @staticmethod
     def parse_volume(value: Any) -> int:
         if isinstance(value, bool) or not isinstance(value, (int, str)):
-            raise LocalRpcError("getVolume did not return a valid volume")
+            raise LocalRpcFieldError("getVolume did not return a valid volume")
         try:
             volume = int(value)
         except (TypeError, ValueError) as err:
-            raise LocalRpcError("getVolume did not return a valid volume") from err
+            raise LocalRpcFieldError("getVolume did not return a valid volume") from err
         if not 0 <= volume <= 100:
-            raise LocalRpcError("getVolume returned a volume outside 0-100")
+            raise LocalRpcFieldError("getVolume returned a volume outside 0-100")
         return volume
 
     async def is_muted(self) -> bool:
@@ -331,7 +424,7 @@ class LocalSoundbarRpcClient:
             return bool(value)
         if isinstance(value, str) and value.lower() in ("true", "false", "0", "1"):
             return value.lower() in ("true", "1")
-        raise LocalRpcError("getMute did not return a valid mute state")
+        raise LocalRpcFieldError("getMute did not return a valid mute state")
 
     async def input_source(self) -> str | None:
         value = (await self.call("inputSelectControl")).get("inputSource")
@@ -359,6 +452,7 @@ class LocalSoundbarRpcClient:
         return value
 
     async def status(self) -> dict[str, Any]:
+        self.status_errors = {}
         values = await asyncio.gather(
             self.power_state(),
             self.volume(),
@@ -378,15 +472,9 @@ class LocalSoundbarRpcClient:
             "codec",
             "identifier",
         )
-        status = {}
-        for key, value in zip(keys, values, strict=True):
-            if key in ("codec", "identifier") and isinstance(
-                value, LocalRpcMethodNotFoundError
-            ):
-                value = None
-            if isinstance(value, BaseException):
-                raise value
-            status[key] = value
+        status, self.status_errors = split_local_readback(
+            dict(zip(keys, values, strict=True)), require_power=True
+        )
         return status
 
     @staticmethod

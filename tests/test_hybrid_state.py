@@ -7,19 +7,41 @@ from unittest.mock import AsyncMock, MagicMock
 
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 
-from custom_components.samsung_soundbar.api_extension.SoundbarDevice import SoundbarDevice
+from custom_components.samsung_soundbar.api_extension.SoundbarDevice import (
+    SoundbarDevice,
+)
 from custom_components.samsung_soundbar.const import (
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
     CONTROL_MODE_SMARTTHINGS_CLOUD,
 )
-from custom_components.samsung_soundbar.entity_updates import register_device_update_listener
+from custom_components.samsung_soundbar.coordinator import (
+    LOCAL_INTERVAL,
+    SoundbarCoordinator,
+)
+from custom_components.samsung_soundbar.entity_updates import (
+    register_device_update_listener,
+)
 from custom_components.samsung_soundbar.local_device import LocalDevice
-from custom_components.samsung_soundbar.local_rpc import LocalRpcCommandError, LocalRpcError
+from custom_components.samsung_soundbar.local_rpc import (
+    LocalRpcCommandError,
+    LocalRpcError,
+)
 from custom_components.samsung_soundbar.switch import SoundbarSwitchAdvancedAudio
-from custom_components.samsung_soundbar.coordinator import SoundbarCoordinator, LOCAL_INTERVAL
 
 
 class TestHybridState(IsolatedAsyncioTestCase):
+    async def test_volume_target_rounds_float_without_losing_one_step(self):
+        self.rpc.set_volume = AsyncMock()
+        self.rpc.status = AsyncMock(return_value={"power": "powerOn", "volume": 29})
+        await self.device.set_volume(0.29)
+        self.rpc.set_volume.assert_awaited_once_with(29)
+
+    async def test_mute_sets_absolute_target_even_when_cached_value_matches(self):
+        self.rpc.set_mute = AsyncMock()
+        self.rpc.status = AsyncMock(return_value={"power": "powerOn", "mute": False})
+        await self.device.mute_volume(False)
+        self.rpc.set_mute.assert_awaited_once_with(False)
+
     def setUp(self) -> None:
         self.rpc = MagicMock()
         self.rpc.power_state = AsyncMock(return_value="powerOn")
