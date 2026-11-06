@@ -235,6 +235,26 @@ class TestCoordinator(IsolatedAsyncioTestCase):
             coordinator.state.diagnostics()["sound_mode"]["source"], "local"
         )
 
+    async def test_fast_field_error_preserves_other_values_without_refreshing_ttl(self):
+        from custom_components.samsung_soundbar.local_rpc import (
+            LocalRpcMethodNotFoundError,
+        )
+
+        device, coordinator = self.make_device(CONTROL_MODE_LOCAL_ONLY)
+        await coordinator.async_refresh()
+        previous = coordinator.state.records["local"]["input_source"].observed_at
+        self.rpc.input_source.side_effect = LocalRpcMethodNotFoundError("unsupported", code=-32601)
+        self.rpc.volume.return_value = 9
+        self.now = 3
+        await coordinator.async_refresh()
+        self.assertTrue(device.available)
+        self.assertEqual(device.volume_level, 0.09)
+        self.assertEqual(coordinator.state.records["local"]["input_source"].observed_at, previous)
+        self.now = 125
+        await device.update_local_input_source(min_age=None)
+        self.assertIsNone(coordinator.state.value("input_source"))
+        self.assertEqual(device.volume_level, 0.09)
+
     async def test_successive_commands_and_poll_cannot_interleave(self):
         device, coordinator = self.make_device()
         await coordinator.async_refresh()

@@ -61,7 +61,7 @@ class TestDirectControlDiagnostics(IsolatedAsyncioTestCase):
                 "after": 11,
                 "readback_matches": True,
                 "state_change_observed": True,
-                "runtime_enabled": False,
+                "runtime_configuration_changed": False,
             },
         )
         self.assertEqual(self.soundbar.methods.count("volumeControl"), 1)
@@ -84,7 +84,7 @@ class TestDirectControlDiagnostics(IsolatedAsyncioTestCase):
         self.assertFalse(result["write_verification"]["readback_matches"])
         self.assertEqual(result["write_verification"]["after"], 8)
         self.assertEqual(self.soundbar.methods.count("volumeControl"), 1)
-        self.assertEqual(self.soundbar.methods.count("createAccessToken"), 1)
+        self.assertEqual(self.soundbar.methods.count("createAccessToken"), 2)
 
     async def test_invalid_probe_parameters_fail_before_any_network_calls(self):
         for method, params in (

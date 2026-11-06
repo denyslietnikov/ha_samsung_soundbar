@@ -10,10 +10,10 @@ permissions:
 
 jobs:
   home-assistant:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.14'
           cache: pip
@@ -43,4 +43,4 @@ jobs:
           custom_components/samsung_soundbar/cloud_errors.py
           custom_components/samsung_soundbar/cloud_repairs.py
           custom_components/samsung_soundbar/repairs.py
-          tests/ha tests/test_cloud_errors.py
+          tests/ha tests/test_cloud_errors.py tests/test_metadata.py

@@ -21,6 +21,15 @@ def register_device_update_listener(
     coordinator = device.coordinator
 
     def available_for(entity):
+        if getattr(entity, "_soundbar_local_only", False):
+            local_available = (
+                coordinator.state.snapshot().local_available
+                if coordinator is not None else device.local_available
+            )
+            return local_available and (
+                not getattr(entity, "_soundbar_requires_on", False)
+                or device.state in ("on", "playing", "paused")
+            )
         capabilities = getattr(entity, "_soundbar_cloud_capabilities", ())
         if (
             capabilities

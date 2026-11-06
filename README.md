@@ -91,6 +91,13 @@ features, while the following media controls use local JSON-RPC over LAN:
 - sound mode
 - codec and streaming-source readback
 
+Q800F also exposes local **Woofer +** and **Woofer -** buttons in Hybrid and
+Local-only modes. They adjust the subwoofer relatively; no absolute level is
+inferred. The buttons require an available LAN connection and an on-state.
+Volume and mute prefer `volumeControl` / `muteControl`, with legacy fallbacks
+when the device reports that a method is unsupported. Power commands require
+matching local readback rather than only a success acknowledgment.
+
 After adding the integration, open its options and select **Hybrid Local +
 SmartThings Cloud**. Configure:
 
@@ -199,7 +206,7 @@ disable existing features. Disabled Cloud features do not disable LAN controls
 in Hybrid; their Cloud commands are blocked and existing controls become
 unavailable rather than deleting entity-registry entries.
 
-Direct-control candidates can be tested explicitly, for example:
+Direct controls can also be tested explicitly, for example:
 
 ```yaml
 action: samsung_soundbar.dump_local_rpc
@@ -215,12 +222,16 @@ This changes the volume to the requested integer (0-100). For a mute probe use
 The service automatically includes `getVolume`/`getMute` before and after
 the write and returns `write_verification` with `readback_matches` and
 `state_change_observed`. Matching an unchanged value does not prove that the
-write changed anything. These candidates are **not enabled in runtime**;
-verified Q800F read/write/readback is required before adopting a model profile.
+write changed anything. A diagnostic probe does not change the integration's
+runtime configuration. Direct volume/mute and relative Woofer keys have been
+verified on Q800F; this does not establish support for every other model.
 
 Bare JSON-RPC errors are reported with their code, including `-32700`. A parse
-error alone is not treated as authentication rejection or automatically retried
-as a write. Explicit token rejection still gets one authentication retry.
+error alone is not automatically retried as a write. Known read-only requests
+can refresh a rejected token and retry once, including Q800F's `-32700` response.
+Relative remote-key commands are never automatically replayed. Failed individual
+fields are exposed in diagnostic `local.field_errors` without refreshing their
+cached timestamps; transport/auth failures still mark the LAN connection down.
 The model-only `getIdentifier` is cached in memory after two matching reads;
 explicit diagnostic calls still read it directly. It is never a device identity.
 

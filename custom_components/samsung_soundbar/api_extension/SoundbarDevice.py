@@ -32,9 +32,13 @@ from ..const import (
 from ..coordinator import coordinated_command
 from ..local_rpc import (
     LOCAL_SOUND_MODE_VALUES,
+    LocalRpcAuthError,
     LocalRpcCommandError,
     LocalRpcError,
+    LocalRpcParseError,
+    LocalRpcTransportError,
     LocalSoundbarRpcClient,
+    split_local_readback,
 )
 from .const import RearSpeakerMode, SpeakerIdentifier
 
@@ -253,6 +257,7 @@ class SoundbarDevice:
         self.__pending_local_sound_mode_count = 0
         self.__update_listeners: set[Callable[[], None]] = set()
         self.__cloud_available = control_mode != CONTROL_MODE_LOCAL_ONLY
+        self.__local_field_errors: dict[str, str] = {}
 
         self.__max_volume = max_volume
 
@@ -444,6 +449,8 @@ class SoundbarDevice:
         was_available = self.__local_available
         try:
             readback = dict(await self.__local_rpc.status())
+            errors = getattr(self.__local_rpc, "status_errors", {})
+            self.__local_field_errors = dict(errors) if isinstance(errors, dict) else {}
             local_status = {
                 **previous_status,
                 **{
@@ -570,9 +577,15 @@ class SoundbarDevice:
                     self.__local_rpc.sound_mode(),
                     return_exceptions=True,
                 )
-                for value in values:
-                    if isinstance(value, BaseException):
-                        raise value
+                keys = ("power", "input_source", "volume", "mute", "sound_mode")
+                readback, errors = split_local_readback(
+                    dict(zip(keys, values, strict=True)), require_power=True
+                )
+                self.__local_field_errors = {
+                    key: error for key, error in self.__local_field_errors.items()
+                    if key not in keys
+                } | errors
+                values = list(readback.values())
                 (
                     local_power,
                     local_input_source,
@@ -817,7 +830,15 @@ class SoundbarDevice:
                     if field not in methods:
                         continue
                     key, method = methods[field]
-                    readback[key] = await method()
+                    try:
+                        readback[key] = await method()
+                    except LocalRpcError as err:
+                        readback[key] = err
+                readback, errors = split_local_readback(readback)
+                self.__local_field_errors = {
+                    key: error for key, error in self.__local_field_errors.items()
+                    if key not in readback
+                } | errors
                 self.__local_status.update(
                     {key: value for key, value in readback.items() if value is not None}
                 )
@@ -1455,6 +1476,40 @@ class SoundbarDevice:
         return self.hybrid_mode or self.has_status_capability("audioMute")
 
     @property
+    def can_control_local_woofer(self) -> bool:
+        return self.hybrid_mode and (
+            self.model == "HW-Q800F"
+            or self.local_identifier == "22_AV_HW-Q800F"
+        )
+
+    async def adjust_local_woofer(self, increase: bool) -> None:
+        if not self.can_control_local_woofer or not self.local_available:
+            raise HomeAssistantError("Local Woofer controls are unavailable")
+
+        async def action():
+            await self.__local_rpc.remote_key(
+                "WOOFER_PLUS" if increase else "WOOFER_MINUS"
+            )
+
+        try:
+            if self.coordinator is not None:
+                await self.coordinator.async_write(action, {})
+            else:
+                await action()
+        except LocalRpcError as err:
+            # Relative commands cannot be safely repeated on another transport.
+            if not isinstance(err, LocalRpcCommandError) or isinstance(
+                err, (LocalRpcAuthError, LocalRpcParseError, LocalRpcTransportError)
+            ):
+                self.__local_available = False
+                self.__local_last_error = str(err)
+                if self.coordinator is not None:
+                    self.coordinator.transport_changed("local", False)
+                else:
+                    self.__notify_update_listeners()
+            raise HomeAssistantError(f"Local Woofer command failed: {err}") from err
+
+    @property
     def can_control_playback(self) -> bool:
         return self.has_status_capability("mediaPlayback") or self.has_status_capability(
             "samsungvd.audioPlayback"
@@ -1583,7 +1638,7 @@ class SoundbarDevice:
 
     @coordinated_command(
         lambda self, volume: {
-            "volume_level": int(volume * self.volume_scale) / self.volume_scale
+            "volume_level": round(volume * self.volume_scale) / self.volume_scale
         }
     )
     async def set_volume(self, volume: float):
@@ -1592,14 +1647,14 @@ class SoundbarDevice:
         This respects the max volume and hovers between
         :param volume: between 0 and 1
         """
-        local_level = int(volume * _LOCAL_VOLUME_MAX)
+        local_level = round(volume * _LOCAL_VOLUME_MAX)
         if await self.__try_local_rpc(
             lambda local: local.set_volume(local_level),
             "set volume",
         ):
             return
 
-        cloud_level = int(
+        cloud_level = round(
             volume * (_LOCAL_VOLUME_MAX if self.hybrid_mode else self.__max_volume)
         )
         await self.__call_smartthings(
@@ -1609,15 +1664,12 @@ class SoundbarDevice:
 
     @coordinated_command(lambda self, mute: {"volume_muted": mute})
     async def mute_volume(self, mute: bool):
-        if self.hybrid_mode:
-            if mute == self.volume_muted:
-                return
-            if await self.__try_local_rpc(
-                lambda local: local.mute_toggle(),
+        if self.hybrid_mode and await self.__try_local_rpc(
+                lambda local: local.set_mute(mute),
                 "mute volume",
             ):
-                self.__local_status["mute"] = mute
-                return
+            self.__local_status["mute"] = mute
+            return
 
         if mute:
             await self.__call_smartthings(
@@ -2374,6 +2426,7 @@ class SoundbarDevice:
             "local": {
                 "available": self.local_available,
                 "last_error": self.local_last_error,
+                "field_errors": dict(self.__local_field_errors),
                 "updated_at": (
                     None
                     if self.__local_status_updated_at is None
