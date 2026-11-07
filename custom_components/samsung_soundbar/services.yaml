@@ -115,6 +115,17 @@ dump_ocf_status:
   name: Dump local OCF status
   description: Read known audio settings through the saved OCF credential. Returns projected values and freshness, never raw responses or secrets. Does not change device settings.
   fields:
+    preset:
+      name: Resources preset
+      description: Audio reads validated settings. Media performs read-only playback/metadata research, without adding controls or background polling. Explicit hrefs override this preset.
+      default: audio
+      selector:
+        select:
+          options:
+            - label: Audio settings
+              value: audio
+            - label: Playback and metadata (read-only)
+              value: media
     device_id:
       name: Device
       description: Samsung Soundbar device. Required only when multiple soundbars are loaded.
@@ -122,8 +133,8 @@ dump_ocf_status:
         device:
           integration: samsung_soundbar
     hrefs:
-      name: Audio resources
-      description: Optional subset of the fixed audio-resource allowlist. Empty list returns cached diagnostics without new reads.
+      name: Local resources
+      description: Optional subset of fixed audio/media resources; overrides the preset. Empty list returns cached audio diagnostics without new reads.
       selector:
         select:
           multiple: true
@@ -133,8 +144,17 @@ dump_ocf_status:
             - /sec/networkaudio/spacefitSound
             - /sec/networkaudio/tone
             - /sec/networkaudio/eq
+            - /sec/networkaudio/currentEQMode
             - /sec/networkaudio/channelVolume
             - /sec/networkaudio/audiosync
+            - /sec/networkaudio/soundFrom
+            - /sec/networkaudio/playback
+            - /sec/networkaudio/musicinfo
+            - /sec/networkaudio/av/audioTrackData
+            - /sec/networkaudio/av/mediaPlayback
+            - /sec/networkaudio/av/mediaTrackControl
+            - /sec/networkaudio/av/mediaPlaybackShuffle
+            - /sec/networkaudio/av/mediaPlaybackRepeat
 
 dump_discovery_snapshot:
   name: Dump local discovery snapshot

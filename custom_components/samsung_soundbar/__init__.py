@@ -61,8 +61,9 @@ from .local_rpc import (
 )
 from .models import SoundbarConfigEntry, SoundbarRuntimeData
 from .ocf_credentials import OcfCredentialError, OcfCredentialStore
+from .ocf_media import MEDIA_HREFS
 from .ocf_repairs import update_local_configuration_issue, update_ocf_issue
-from .ocf_state import POLL_HREFS
+from .ocf_state import DIAGNOSTIC_HREFS, POLL_HREFS
 from .services import async_register_entity_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,8 +73,11 @@ PLATFORMS = ["media_player", "switch", "number", "select", "sensor"]
 DUMP_OCF_STATUS_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_HA_DEVICE_ID): cv.string,
+        vol.Optional("preset", default="audio"): vol.In(("audio", "media")),
         vol.Optional("hrefs"): vol.All(
-            cv.ensure_list, vol.Length(max=len(POLL_HREFS)), [vol.In(POLL_HREFS)]
+            cv.ensure_list,
+            vol.Length(max=len(DIAGNOSTIC_HREFS)),
+            [vol.In(DIAGNOSTIC_HREFS)],
         ),
     }
 )
@@ -303,7 +307,10 @@ def _async_create_dump_ocf_status_service(hass: HomeAssistant):
         device = _async_resolve_service_device(hass, call.data.get(CONF_HA_DEVICE_ID))
         try:
             return await device.coordinator.async_ocf_snapshot(
-                call.data.get("hrefs", POLL_HREFS)
+                call.data.get(
+                    "hrefs",
+                    MEDIA_HREFS if call.data["preset"] == "media" else POLL_HREFS,
+                )
             )
         except OcfError:
             raise HomeAssistantError(

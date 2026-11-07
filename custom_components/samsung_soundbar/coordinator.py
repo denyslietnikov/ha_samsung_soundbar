@@ -9,11 +9,19 @@ from time import monotonic
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .local_ocf import OcfError
 from .local_rpc import LocalRpcError
 from .ocf_credentials import async_complete
-from .ocf_state import OCF_FIELDS, POLL_HREFS, RESOURCE_FIELDS, project_ocf
+from .ocf_media import MEDIA_HREFS, project_media_diagnostic
+from .ocf_state import (
+    DIAGNOSTIC_HREFS,
+    OCF_FIELDS,
+    POLL_HREFS,
+    RESOURCE_FIELDS,
+    project_ocf,
+)
 from .state import SoundbarState, StateSnapshot
 
 LOGGER = logging.getLogger(__name__)
@@ -250,12 +258,21 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         self.transport_changed("ocf", self.ocf is not None and bool(self.ocf.available))
 
     async def async_ocf_snapshot(self, hrefs=POLL_HREFS):
-        """Read only the fixed audio projection, never return raw OCF responses."""
+        """Opt-in fixed GETs; media recon never enters shared state or polling."""
         hrefs = tuple(hrefs)
-        if len(hrefs) > len(POLL_HREFS) or any(
-            href not in POLL_HREFS for href in hrefs
+        if len(hrefs) > len(DIAGNOSTIC_HREFS) or any(
+            href not in DIAGNOSTIC_HREFS for href in hrefs
         ):
             raise OcfError("unverified")
+        media = {
+            href: {"last_error": "not_read", "fields": {}}
+            for href in dict.fromkeys(hrefs)
+            if href in MEDIA_HREFS
+        }
+        blocker = self._media_read_blocker()
+        if blocker is not None:
+            for status in media.values():
+                status["last_error"] = blocker
         if (
             hrefs
             and self.ocf is not None
@@ -265,19 +282,70 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             # Join the current sweep, then serialize explicitly requested reads.
             if self._ocf_task is not None and not self._ocf_task.done():
                 await self._async_wait_ocf_poll()
-            async with self._write_lock:
-                for href in dict.fromkeys(hrefs):
+            for href in dict.fromkeys(hrefs):
+                # Release between resources so queued commands/forget can proceed.
+                async with self._write_lock:
                     if (
                         self._shutdown_requested
                         or self._ocf_detaching
                         or self.ocf is None
                         or not self.state.use_ocf
                     ):
+                        for status in media.values():
+                            if status["last_error"] == "not_read":
+                                status["last_error"] = (
+                                    self._media_read_blocker() or "closed"
+                                )
                         break
-                    kind = await self._read_ocf(href)
+                    if href in media:
+                        status = await self._read_media_diagnostic(href)
+                        media[href] = status
+                        kind = status["last_error"]
+                    else:
+                        kind = await self._read_ocf(href)
                     if kind in {"auth", "identity", "transport", "backoff", "closed"}:
                         break
-        return self.ocf_diagnostics()
+        result = self.ocf_diagnostics()
+        if media:
+            result["media"] = {
+                "read_only": True,
+                "controls_verified": False,
+                "units_verified": False,
+                "resources": media,
+            }
+        return result
+
+    def _media_read_blocker(self):
+        if self._shutdown_requested or self._ocf_detaching:
+            return "closed"
+        if not self.device.ocf_enabled:
+            return "disabled"
+        if self.ocf is None:
+            return "not_configured"
+        if not self.state.use_ocf:
+            return "disabled"
+        return None
+
+    async def _read_media_diagnostic(self, href):
+        try:
+            payload = await self.ocf.async_read(href)
+            projection = project_media_diagnostic(href, payload)
+        except (OcfError, ValueError) as error:
+            self.transport_changed(
+                "ocf", self.ocf is not None and bool(self.ocf.available)
+            )
+            return {
+                "last_error": error.kind
+                if isinstance(error, OcfError)
+                else "malformed",
+                "fields": {},
+            }
+        self.transport_changed("ocf", self.ocf is not None and bool(self.ocf.available))
+        return {
+            "last_error": None,
+            "observed_at": dt_util.utcnow().isoformat(),
+            **projection,
+        }
 
     def ocf_diagnostics(self):
         now = self._clock()

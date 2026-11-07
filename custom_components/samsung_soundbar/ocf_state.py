@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from .ocf_channels import CHANNEL_NAMES, parse_channel_volume
+from .ocf_media import MEDIA_HREFS
 from .ocf_profiles import parse_eq_metadata
 
 BASE = "/sec/networkaudio/"
@@ -35,6 +36,7 @@ RESOURCE_FIELDS = {
 }
 OCF_FIELDS = frozenset().union(*RESOURCE_FIELDS.values())
 POLL_HREFS = tuple(RESOURCE_FIELDS)
+DIAGNOSTIC_HREFS = (*POLL_HREFS, *MEDIA_HREFS)
 
 
 @dataclass(frozen=True)

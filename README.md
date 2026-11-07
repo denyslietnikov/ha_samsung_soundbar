@@ -301,6 +301,29 @@ cached diagnostics without new reads. The result contains projected values,
 source/age/TTL and errors, never raw OCF responses, PSK or identity UUIDs.
 Use a Home Assistant `device_id` when multiple soundbars are loaded.
 
+For the read-only playback/metadata investigation, request the explicit preset:
+
+```yaml
+action: samsung_soundbar.dump_ocf_status
+data:
+  preset: media
+```
+
+This reads eight fixed media endpoints once, through the existing OCF session.
+It does not start streaming, issue playback commands, change power or volume,
+add background polling, or publish media entities. The `media.resources` result
+contains per-resource errors, UTC observation times, recognized protocol enums,
+raw counters with **unverified units**, and `missing`/`empty`/`present`/`invalid`
+field summaries. Track text and thumbnail URLs are never returned or fetched.
+Reported modes are **not verified commands**. Explicit `hrefs` overrides the
+preset, including an empty list; omitted preset remains `audio`.
+
+Future field checks need separate snapshots during owner-controlled play,
+pause and stopped/disconnected streaming, with the actual app state recorded.
+Current TV eARC reads contain empty title/artist/album/thumbnail. AirPlay/Cast/
+Roon metadata, command effects and counter units remain unconfirmed; no Artwork
+placeholder or speculative playback buttons have been restored.
+
 `samsung_soundbar.dump_discovery_snapshot` returns a safe local coordinator
 snapshot. Remote execute/status diagnostic actions have been removed.
 
