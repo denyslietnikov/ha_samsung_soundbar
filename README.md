@@ -79,6 +79,7 @@ still need field-testing.
 | Power, volume, mute | RPC with local readback | Same RPC route |
 | Source: Input, Sound: Mode | RPC capability-dependent | Same RPC route |
 | Volume and Sound From sensors | Local values when available | Same local values |
+| Media title / artist / album | Not exposed | Read-only Q800F AirPlay metadata in the existing media player |
 | Tone: Woofer | Not exposed | Validated Q800F OCF profile, -12 to +6 dB, step 1 |
 | Tone: Bass / Treble | Not exposed | Independently validated OCF profiles, -6 to +6, step 1 |
 | Channels: Center / Side / Front Top / Rear / Rear Top | Not exposed | Independent Q800F OCF sliders, -6 to +6, step 1, only while that channel reports available |
@@ -116,10 +117,33 @@ changes are read by the normal OCF sweep, not RPC's faster core polling.
 
 Playback play/pause/stop/next/previous, legacy channel-control actions, rear
 speaker mode and Active Voice Amplifier controls are removed. Their integration
-actions are no longer registered. Media title, artist, duration, position and
-artwork remain unknown (`None`); no placeholder artwork or invented metadata
-is published. Available local model/manufacturer/firmware metadata is used
+actions are no longer registered. Media duration, position and artwork remain
+unknown (`None`); no placeholder artwork or invented metadata is published.
+Available local model/manufacturer/firmware metadata is used
 without overwriting existing registry metadata with unknown values.
+
+### AirPlay Track Text
+
+In Hybrid Local + OCF, a validated Q800F on the AirPlay input exposes title,
+artist and album as native attributes of the existing media player. Text is read
+through the shared OCF client about every 5 seconds while fresh RPC state confirms
+power on, WIFI and AirPlay. Audio-setting polling stays at 30 seconds; core RPC
+polling stays at 2 seconds. Local-only does not read OCF metadata.
+
+Each successful read replaces the complete text snapshot. Empty/invalid title,
+missing artist/album, source or power changes, transport failures and credential
+removal clear the corresponding text. Unrefreshed text expires after 15 seconds.
+Late responses crossing context changes cannot restore old metadata, including
+AirPlay -> another input -> AirPlay. The integration does not persist or restore
+its track cache across restarts. HA Recorder may retain native media attributes
+according to your history settings.
+
+Track text is visible only in normal HA media attributes, not in diagnostic
+responses or logs. There are no new entities, Artwork placeholders, image URL
+requests, duration/position guesses, playback buttons or inferred playing/paused
+states. The device's on/off state remains RPC-owned. Paused AirPlay may retain
+track text while the connection remains active. Cast and Roon text need separate
+device verification before enabling those inputs.
 
 The retained actions are `select_soundmode`, `set_woofer_level`,
 `set_night_mode`, `set_bass_enhancer`, `set_voice_enhancer` and
@@ -320,9 +344,18 @@ preset, including an empty list; omitted preset remains `audio`.
 
 Future field checks need separate snapshots during owner-controlled play,
 pause and stopped/disconnected streaming, with the actual app state recorded.
-Current TV eARC reads contain empty title/artist/album/thumbnail. AirPlay/Cast/
-Roon metadata, command effects and counter units remain unconfirmed; no Artwork
-placeholder or speculative playback buttons have been restored.
+Owner-controlled Q800F AirPlay checks confirmed nonempty title/artist/album
+during play and pause, then empty fields after disconnect and return to ARC/eARC.
+`playback.status` reports exact `PLAYING` during playback but `STOPPED` on both
+iPhone pause and disconnect; `av/mediaPlayback.modes` similarly reports `play`
+or `stop`. These observations do not distinguish pause from stop or imply power
+off. Diagnostics preserve the observed uppercase enums without changing UI state.
+`position` grows at roughly 1000 units/second and resets to zero on pause, but
+its relationship to the iPhone track timeline is not yet verified. Duration stays
+zero and thumbnail stays empty even during AirPlay. Only guarded read-only
+AirPlay text publishing is enabled; Artwork, speculative playback buttons and
+unit conversion remain disabled. Cast/Roon, command effects and installed-HA
+track-change behavior need further field checks.
 
 `samsung_soundbar.dump_discovery_snapshot` returns a safe local coordinator
 snapshot. Remote execute/status diagnostic actions have been removed.

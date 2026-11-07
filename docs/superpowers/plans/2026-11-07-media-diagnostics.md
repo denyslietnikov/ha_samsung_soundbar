@@ -26,15 +26,22 @@ writes require new consent. No power or volume changes, no deployment or commits
       lifecycle checks and resource-scoped errors, auth/identity hard stop.
 - [x] Real HA tests: service request/response, no POST/core/polling regressions,
       RPC-only no Store/DTLS, cancellation/forget and no untrusted output.
-- [ ] Correlate owner-controlled playback when available. Record actual results
+- [x] Correlate owner-controlled AirPlay playback. Record actual results
       separately from unverified commands/DSP behavior; update README/main plan.
 - [x] Review, full unit/HA tests, lint/JSON/YAML; guarded apply to develop.
 
-The owner explicitly deferred AirPlay correlation. No playback/PWR/volume writes
-were performed. Current eARC observations: metadata empty, numeric counters zero;
-no commands, counter units, cover retrieval or playback/UI state are verified.
-README and main roadmap retain this distinction and the next manual step.
+AirPlay correlation was initially deferred, then completed with owner-controlled
+play/pause/resume/disconnect on 2026-11-07. PLAYING/play becomes STOPPED/stop on
+pause, resets position0 and retains title/artist/album; disconnect clears those
+fields and returns the input through ARC to E_ARC. Both phases keep RPC power on.
+Thumbnail remains empty and duration0. The position rate is roughly1000 units/s,
+not yet verified against the phone timeline. Exact observed uppercase statuses
+now pass diagnostics with no UI/power inference. No playback/PWR/volume writes.
+Cast/Roon, track changes, actual playback commands and artwork remain unverified.
 
-Verification: 344 unit tests and 266 network-blocked HA tests passed. Ruff,
+Initial diagnostics verification: 344 unit tests and 266 network-blocked HA tests passed. Ruff,
 formatting, service/workflow YAML and translation JSON validated. Independent
 read-only review found no concrete blockers; no installed-HA field test claimed.
+
+Uppercase-status follow-up: new unit and HA regressions reproduced the missing
+enums before the allowlist fix; 345 unit and 268 HA tests pass afterwards.

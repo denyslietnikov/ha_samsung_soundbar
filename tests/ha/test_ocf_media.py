@@ -123,6 +123,22 @@ async def test_media_preset_reads_exactly_eight_resources_without_writes(
     media.client.async_write.assert_not_awaited()
 
 
+@pytest.mark.parametrize("status", ["PLAYING", "STOPPED"])
+async def test_observed_airplay_status_is_diagnostic_only(hass, entry, media, status):
+    await setup(hass, entry)
+    href = BASE + "playback"
+    media.payloads[href][PREFIX + "status"] = status
+    response = await dump(hass, {"hrefs": [href]})
+    assert response["media"]["resources"][href]["fields"]["status"] == {
+        "state": "value",
+        "value": status,
+    }
+    assert response["media"]["controls_verified"] is False
+    assert entry.runtime_data.device.state == "on"
+    assert entry.runtime_data.device.media_title is None
+    media.client.async_write.assert_not_awaited()
+
+
 async def test_audio_remains_default_and_background_never_reads_media(
     hass, entry, media
 ):

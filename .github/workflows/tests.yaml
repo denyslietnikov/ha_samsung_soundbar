@@ -79,3 +79,7 @@ jobs:
           tests/test_ocf_levels.py
           custom_components/samsung_soundbar/ocf_media.py
           tests/test_ocf_media.py tests/test_ocf_media_diagnostics.py
+          custom_components/samsung_soundbar/ocf_track.py
+          tests/test_ocf_track.py tests/test_ocf_track_coordinator.py
+          tests/test_ocf_track_state.py
+          tests/test_media_text_presentation.py

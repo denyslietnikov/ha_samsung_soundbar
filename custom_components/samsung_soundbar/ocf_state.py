@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from .ocf_channels import CHANNEL_NAMES, parse_channel_volume
 from .ocf_media import MEDIA_HREFS
 from .ocf_profiles import parse_eq_metadata
+from .ocf_track import MEDIA_TEXT_FIELDS
 
 BASE = "/sec/networkaudio/"
 PREFIX = "x.com.samsung.networkaudio."
@@ -34,7 +35,7 @@ RESOURCE_FIELDS = {
     },
     BASE + "audiosync": {"audio_sync", "audio_sync_supported"},
 }
-OCF_FIELDS = frozenset().union(*RESOURCE_FIELDS.values())
+OCF_FIELDS = frozenset().union(*RESOURCE_FIELDS.values(), MEDIA_TEXT_FIELDS)
 POLL_HREFS = tuple(RESOURCE_FIELDS)
 DIAGNOSTIC_HREFS = (*POLL_HREFS, *MEDIA_HREFS)
 

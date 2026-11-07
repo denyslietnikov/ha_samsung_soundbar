@@ -5,10 +5,16 @@ from time import monotonic
 from typing import Any
 
 from .ocf_state import OCF_FIELDS
+from .ocf_track import MEDIA_TEXT_FIELDS, MEDIA_TEXT_TTL
 
 LOCAL_TTL = 120.0
 STREAMING_TTL = 15.0
 WRITE_SETTLE_TIME = 5.0
+MEDIA_CONTEXT = {
+    "power": "on",
+    "input_source": "WIFI",
+    "sound_from_detail_name": "AirPlay",
+}
 LOCAL_FIELDS = frozenset(
     {
         "power",
@@ -61,6 +67,53 @@ class SoundbarState:
         self.written_at: dict[str, float] = {}
         self.write_sources: dict[str, str] = {}
         self.ocf_unavailable_fields: set[str] = set()
+        self._media_generation = 0
+
+    def clear_media(self):
+        """Revoke every text observation and any in-flight context token."""
+        self._media_generation += 1
+        for key in MEDIA_TEXT_FIELDS:
+            for values in self.records.values():
+                values.pop(key, None)
+            self.pending.pop(key, None)
+            self.write_only.pop(key, None)
+            self.written_at.pop(key, None)
+            self.write_sources.pop(key, None)
+
+    def media_context(self):
+        """A generation token authorizes text, never playback or device writes."""
+        if not (
+            self.use_local
+            and self.use_ocf
+            and self.transport_available["rpc"]
+            and self.transport_available["ocf"]
+        ):
+            return None
+        now = self.clock()
+        for key, expected in MEDIA_CONTEXT.items():
+            record = self.records["rpc"].get(key)
+            pending = self.pending.get(key)
+            if (
+                record is None
+                or not record.fresh(now)
+                or record.value != expected
+                or record.observed_at < self.written_at.get(key, float("-inf"))
+                or pending is not None
+                and pending.fresh(now)
+                or key in self.write_only
+            ):
+                return None
+        return self._media_generation
+
+    def _context_observations(self):
+        now = self.clock()
+        return tuple(
+            record.value
+            if (record := self.records["rpc"].get(key)) is not None
+            and record.fresh(now)
+            else None
+            for key in MEDIA_CONTEXT
+        )
 
     def merge(
         self, source: str, values: dict[str, Any], *, observed_at: float | None = None
@@ -76,6 +129,7 @@ class SoundbarState:
         ):
             return
         now = self.clock() if observed_at is None else observed_at
+        previous_context = self._context_observations() if source == "rpc" else None
         for key, value in values.items():
             if (
                 source not in self._sources(key)
@@ -89,6 +143,8 @@ class SoundbarState:
             ttl = (
                 None
                 if source == "rpc" and key == "local_identifier"
+                else MEDIA_TEXT_TTL
+                if key in MEDIA_TEXT_FIELDS
                 else STREAMING_TTL
                 if key == "sound_from_detail_name"
                 else LOCAL_TTL
@@ -108,6 +164,8 @@ class SoundbarState:
                 self.write_only.pop(key, None)
             elif pending is None or not pending.fresh(now):
                 self.write_only.pop(key, None)
+        if source == "rpc" and previous_context != self._context_observations():
+            self.clear_media()
 
     def expect(
         self,
@@ -117,6 +175,13 @@ class SoundbarState:
         source: str | None = None,
     ):
         now = self.clock()
+        if source in (None, "rpc") and any(
+            key in MEDIA_CONTEXT
+            and value is not None
+            and self._sources(key) == ("rpc",)
+            for key, value in values.items()
+        ):
+            self.clear_media()
         for key, value in values.items():
             if (
                 value is None
@@ -133,6 +198,9 @@ class SoundbarState:
 
     def begin_write(self, fields, *, source):
         """Supersede older command guards without inventing a new field value."""
+        fields = tuple(fields)
+        if source == "rpc" and set(fields) & MEDIA_CONTEXT.keys():
+            self.clear_media()
         now = self.clock()
         for key in fields:
             self.written_at[key] = now
@@ -141,6 +209,11 @@ class SoundbarState:
             self.write_only.pop(key, None)
 
     def invalidate(self, source, fields):
+        fields = tuple(fields)
+        if (source == "rpc" and set(fields) & MEDIA_CONTEXT.keys()) or (
+            source == "ocf" and set(fields) & MEDIA_TEXT_FIELDS
+        ):
+            self.clear_media()
         for key in fields:
             self.records[source].pop(key, None)
             if source in self._sources(key):
@@ -150,10 +223,14 @@ class SoundbarState:
     def _sources(self, key):
         if key in OCF_FIELDS:
             return ("ocf",) if self.use_ocf else ()
-        # Core fields and optional media metadata belong to RPC, never OCF.
+        # Core fields belong to RPC; the three allowlisted text fields are OCF-only.
         return ("rpc",) if self.use_local else ()
 
     def resolve(self, key: str) -> FieldValue | None:
+        if key in MEDIA_TEXT_FIELDS and (
+            self.media_context() is None or key in self.ocf_unavailable_fields
+        ):
+            return None
         now = self.clock()
         pending = self.pending.get(key)
         if pending is not None and pending.fresh(now):

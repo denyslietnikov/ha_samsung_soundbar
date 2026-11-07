@@ -35,6 +35,10 @@ class TestLocalTransportState(TestCase):
         }
         self.state.merge("rpc", metadata)
         for key, value in metadata.items():
+            if key in {"media_title", "media_artist"}:
+                self.assertIsNone(self.state.value(key))
+                self.assertNotIn(key, self.state.snapshot().values)
+                continue
             self.assertEqual(self.state.value(key), value)
             self.assertEqual(self.state.snapshot().values[key], value)
 

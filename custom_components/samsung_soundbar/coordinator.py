@@ -15,6 +15,7 @@ from .local_ocf import OcfError
 from .local_rpc import LocalRpcError
 from .ocf_credentials import async_complete
 from .ocf_media import MEDIA_HREFS, project_media_diagnostic
+from .ocf_profiles import Q800F_WOOFER
 from .ocf_state import (
     DIAGNOSTIC_HREFS,
     OCF_FIELDS,
@@ -22,7 +23,13 @@ from .ocf_state import (
     RESOURCE_FIELDS,
     project_ocf,
 )
-from .state import SoundbarState, StateSnapshot
+from .ocf_track import (
+    MEDIA_POLL_INTERVAL,
+    MEDIA_TEXT_FIELDS,
+    TRACK_HREF,
+    project_track_text,
+)
+from .state import MEDIA_CONTEXT, SoundbarState, StateSnapshot
 
 LOGGER = logging.getLogger(__name__)
 LOCAL_INTERVAL = timedelta(seconds=2)
@@ -77,9 +84,11 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         self._force_refresh = False
         self.ocf = None
         self._ocf_task = None
+        self._ocf_starting = False
         self._ocf_detach_task = None
         self._ocf_detaching = False
         self._next_ocf = 0.0
+        self._next_media = 0.0
         self._ocf_resources = {}
         self._shutdown_task = None
         self._unsub_stop = None
@@ -89,14 +98,24 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
     def in_command(self):
         return self._command_task is asyncio.current_task()
 
-    def publish(self):
-        if not self._batching and not self._shutdown_requested:
+    def publish(self, *, force=False):
+        if (
+            any(key in self.state.records["ocf"] for key in MEDIA_TEXT_FIELDS)
+            and not self._media_text_allowed()
+        ):
+            self.state.clear_media()
+        if (force or not self._batching) and not self._shutdown_requested:
             snapshot = self.state.snapshot()
             if snapshot != self.data or not self.last_update_success:
                 self.async_set_updated_data(snapshot)
 
     def receive(self, source, values, *, observed_at=None):
+        context = self.state.media_context()
         self.state.merge(source, values, observed_at=observed_at)
+        if context != self.state.media_context():
+            self._next_media = 0.0
+            if self.state.media_context() is not None:
+                self._schedule_ocf()
         self.publish()
 
     def transport_changed(self, source, available):
@@ -104,6 +123,9 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         if source not in self.state.transport_available:
             raise ValueError("Unknown local transport")
         self.state.transport_available[source] = available
+        if not available:
+            self.state.clear_media()
+            self._next_media = 0.0
         self.publish()
 
     async def _async_update_data(self):
@@ -114,7 +136,7 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             self._batching = True
             try:
                 if self._force_refresh:
-                    self._next_full_local = self._next_ocf = 0.0
+                    self._next_full_local = self._next_ocf = self._next_media = 0.0
                     self._force_refresh = False
                 now = self._clock()
                 self._schedule_ocf()
@@ -135,6 +157,10 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         self._force_refresh = True
         await self.async_refresh()
         await self._async_wait_ocf_poll()
+        # A text-only task may have been running when the full refresh was requested.
+        if self._clock() >= self._next_ocf:
+            self._schedule_ocf()
+            await self._async_wait_ocf_poll()
 
     async def _async_wait_ocf_poll(self):
         task = self._ocf_task
@@ -163,6 +189,7 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             self.config_entry.async_on_unload(self._remove_stop_listener)
         self.state.use_ocf = client is not None and self.device.ocf_enabled
         self._next_ocf = 0.0
+        self._next_media = 0.0
         self._schedule_ocf()
 
     async def async_detach_ocf(self):
@@ -204,28 +231,92 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
     def _schedule_ocf(self):
         if (
             not self.state.use_ocf
+            or self._ocf_starting
             or self._ocf_detaching
             or self._shutdown_requested
             or self._clock() < self._next_ocf
+            and not (self._clock() >= self._next_media and self._media_text_allowed())
             or self._ocf_task is not None
             and not self._ocf_task.done()
         ):
             return
         # The owned task avoids making optional DTLS timeouts block the 2s RPC tier.
-        self._ocf_task = self.hass.async_create_task(self._poll_ocf())
+        # HA starts tasks eagerly: receive() may reenter before assignment finishes.
+        self._ocf_starting = True
+        try:
+            self._ocf_task = self.hass.async_create_task(self._poll_ocf())
+        finally:
+            self._ocf_starting = False
 
     async def _poll_ocf(self):
+        audio_due = self._clock() >= self._next_ocf
         try:
-            for href in POLL_HREFS:
+            for href in POLL_HREFS if audio_due else ():
                 async with self._write_lock:
                     if self._shutdown_requested or self._ocf_detaching:
                         return
                     kind = await self._read_ocf(href)
                 if kind in {"auth", "identity", "transport", "backoff", "closed"}:
-                    break
+                    return
+            if self._clock() >= self._next_media and self._media_text_allowed():
+                async with self._write_lock:
+                    if self._media_text_allowed():
+                        await self._read_track_text()
+        except asyncio.CancelledError:
+            self.state.clear_media()
+            self.publish(force=True)
+            raise
         finally:
-            self._next_ocf = self._clock() + OCF_INTERVAL
+            if audio_due:
+                self._next_ocf = self._clock() + OCF_INTERVAL
             self.publish()
+
+    def _media_text_allowed(self):
+        return bool(
+            not self._shutdown_requested
+            and not self._ocf_detaching
+            and self.device.ocf_enabled
+            and self.state.media_context() is not None
+            and self.ocf is not None
+            and self.ocf.available is True
+            and self.ocf.validated is True
+            and (
+                self.device.model == Q800F_WOOFER.model
+                or self.device.local_identifier == Q800F_WOOFER.rpc_identifier
+            )
+        )
+
+    def media_text_value(self, field):
+        """Only normal HA media attributes may consume these private text fields."""
+        if field not in MEDIA_TEXT_FIELDS or not self._media_text_allowed():
+            return None
+        return self.state.value(field)
+
+    async def _read_track_text(self):
+        client = self.ocf
+        context = self.state.media_context()
+        observed_at = self._clock()
+        self._next_media = observed_at + MEDIA_POLL_INTERVAL
+        try:
+            payload = await client.async_read(TRACK_HREF)
+            values = project_track_text(payload)
+        except asyncio.CancelledError:
+            self.state.clear_media()
+            raise
+        except (OcfError, ValueError):
+            self.state.clear_media()
+            self.transport_changed("ocf", client.available is True)
+            return
+        if (
+            client is not self.ocf
+            or context != self.state.media_context()
+            or not self._media_text_allowed()
+        ):
+            self.state.clear_media()
+            return
+        # Replace the full observation atomically; omitted artist/album cannot linger.
+        self.state.clear_media()
+        self.receive("ocf", values, observed_at=observed_at)
 
     async def _read_ocf(self, href):
         observed_at = self._clock()
@@ -365,7 +456,7 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             "values": {
                 key: record.value
                 for key, record in records.items()
-                if key in OCF_FIELDS and record.fresh(now)
+                if key in OCF_FIELDS - MEDIA_TEXT_FIELDS and record.fresh(now)
             },
             "fields": {
                 key: value
@@ -562,6 +653,9 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             self._batching = True
             try:
                 self.state.begin_write(fields, source="rpc")
+                if fields & MEDIA_CONTEXT.keys():
+                    # Clear published text before a context command can block on I/O.
+                    self.publish(force=True)
                 result = await action()
                 self.state.expect(expected, source="rpc")
                 if fields:

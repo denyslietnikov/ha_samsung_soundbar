@@ -68,6 +68,18 @@ class SoundbarMediaPlayer(MediaPlayerEntity):
     def name(self):
         return self.device.device_name or DEFAULT_NAME
 
+    @property
+    def media_title(self) -> str | None:
+        return self.device.media_title
+
+    @property
+    def media_artist(self) -> str | None:
+        return self.device.media_artist
+
+    @property
+    def media_album_name(self) -> str | None:
+        return self.device.media_album_name
+
     # ---------- POWER ON/OFF ------------
 
     @property

@@ -16,7 +16,20 @@ MEDIA_HREFS = tuple(
     )
 )
 
-_STATUS = frozenset({"play", "pause", "stop", "playing", "paused", "stopped", "idle"})
+# Exact uppercase variants observed on Q800F; STOPPED also occurs on AirPlay pause.
+_STATUS = frozenset(
+    {
+        "play",
+        "pause",
+        "stop",
+        "playing",
+        "paused",
+        "stopped",
+        "idle",
+        "PLAYING",
+        "STOPPED",
+    }
+)
 _PLAYBACK_MODES = frozenset({"play", "pause", "stop", "fastforward", "rewind"})
 _SHUFFLE = frozenset({"enabled", "disabled"})
 _REPEAT = frozenset(

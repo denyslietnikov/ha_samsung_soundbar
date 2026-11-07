@@ -66,6 +66,18 @@ class TestOcfMedia(TestCase):
                     {"status": {"state": "value", "value": status}},
                 )
 
+    def test_observed_q800f_airplay_uppercase_status_is_preserved_not_interpreted(self):
+        for status in ("PLAYING", "STOPPED"):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    self.fields("playback", {PREFIX + "status": status})["status"],
+                    {"state": "value", "value": status},
+                )
+        self.assertEqual(
+            self.fields("playback", {PREFIX + "status": "PAUSED"})["status"],
+            {"state": "unrecognized"},
+        )
+
     def test_enum_missing_invalid_empty_and_unrecognized_are_distinct(self):
         for payload, expected in (
             ({}, "missing"),

@@ -463,12 +463,22 @@ class SoundbarDevice:
         await self.ocf_equalizer.async_select(preset)
 
     @property
-    def media_title(self):
-        return None
+    def media_title(self) -> str | None:
+        if self.coordinator is None:
+            return None
+        return self.coordinator.media_text_value("media_title")
 
     @property
-    def media_artist(self):
-        return None
+    def media_artist(self) -> str | None:
+        if self.coordinator is None:
+            return None
+        return self.coordinator.media_text_value("media_artist")
+
+    @property
+    def media_album_name(self) -> str | None:
+        if self.coordinator is None:
+            return None
+        return self.coordinator.media_text_value("media_album_name")
 
     @property
     def media_coverart_url(self):
@@ -1413,8 +1423,10 @@ class SoundbarDevice:
                 "treble_level": self.tone_level("treble_level"),
             },
             "media": {
-                "media_title": self.media_title,
-                "media_artist": self.media_artist,
+                # Track text is private: expose it only as native HA attributes.
+                "media_title": None,
+                "media_artist": None,
+                "media_album_name": None,
                 "media_cover_url": self.media_coverart_url,
                 "media_duration": self.media_duration,
                 "media_position": self.media_position,
