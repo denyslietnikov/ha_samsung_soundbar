@@ -45,7 +45,7 @@ class TestFieldState(TestCase):
 
     def test_priority_partial_merge_and_per_field_age(self):
         self.state.merge(
-            "local", {"volume_level": 0.08, "power": "on", "sound_mode": "Game Pro"}
+            "rpc", {"volume_level": 0.08, "power": "on", "sound_mode": "Game Pro"}
         )
         self.now = 2
         self.state.merge(
@@ -54,13 +54,13 @@ class TestFieldState(TestCase):
         self.assertEqual(self.state.value("volume_level"), 0.08)
         self.assertEqual(self.state.value("power"), "on")
         self.now = 3
-        self.state.merge("local", {"power": "on", "volume_level": None})
+        self.state.merge("rpc", {"power": "on", "volume_level": None})
         self.assertEqual(self.state.diagnostics()["volume_level"]["age_seconds"], 2)
         self.assertEqual(self.state.diagnostics()["power"]["age_seconds"], 0)
         self.assertTrue(self.state.value("bass_mode"))
 
     def test_stale_local_field_falls_back_only_to_fresh_cloud(self):
-        self.state.merge("local", {"volume_level": 0.08})
+        self.state.merge("rpc", {"volume_level": 0.08})
         self.now = 122
         self.state.merge("cloud", {"volume_level": 0.09})
         self.assertEqual(self.state.value("volume_level"), 0.09)
@@ -69,37 +69,37 @@ class TestFieldState(TestCase):
 
     def test_streaming_field_has_shorter_ttl_than_input(self):
         self.state.merge(
-            "local", {"input_source": "WIFI", "sound_from_detail_name": "AirPlay"}
+            "rpc", {"input_source": "WIFI", "sound_from_detail_name": "AirPlay"}
         )
         self.now = 17
         self.assertIsNone(self.state.value("sound_from_detail_name"))
         self.assertEqual(self.state.value("input_source"), "WIFI")
 
     def test_static_model_identifier_does_not_expire_with_core_status(self):
-        self.state.merge("local", {"local_identifier": "22_AV_HW-Q800F", "power": "on"})
+        self.state.merge("rpc", {"local_identifier": "22_AV_HW-Q800F", "power": "on"})
         self.now = 200
         self.assertEqual(self.state.value("local_identifier"), "22_AV_HW-Q800F")
         self.assertIsNone(self.state.value("power"))
         self.assertIsNone(self.state.diagnostics()["local_identifier"]["ttl_seconds"])
 
     def test_write_guard_filters_pre_write_and_stale_readback(self):
-        self.state.merge("local", {"sound_mode": "Standard"})
+        self.state.merge("rpc", {"sound_mode": "Standard"})
         self.now = 2
         self.state.expect({"sound_mode": "Game Pro"})
-        self.state.merge("local", {"sound_mode": "Surround"}, observed_at=1)
+        self.state.merge("rpc", {"sound_mode": "Surround"}, observed_at=1)
         self.assertEqual(self.state.value("sound_mode"), "Game Pro")
-        self.state.merge("local", {"sound_mode": "Standard"})
+        self.state.merge("rpc", {"sound_mode": "Standard"})
         self.assertEqual(self.state.value("sound_mode"), "Game Pro")
         self.now = 8
         self.assertEqual(self.state.value("sound_mode"), "Standard")
 
     def test_cloud_cannot_acknowledge_local_write_and_unmask_old_local_state(self):
-        self.state.merge("local", {"sound_mode": "Standard"})
+        self.state.merge("rpc", {"sound_mode": "Standard"})
         self.now = 2
         self.state.expect({"sound_mode": "Surround"})
         self.state.merge("cloud", {"sound_mode": "Surround"})
         self.assertEqual(self.state.value("sound_mode"), "Surround")
-        self.state.merge("local", {"sound_mode": "Surround"})
+        self.state.merge("rpc", {"sound_mode": "Surround"})
         self.assertNotIn("sound_mode", self.state.pending)
 
     def test_write_only_switch_does_not_revert_to_pre_write_state(self):
@@ -118,10 +118,10 @@ class TestFieldState(TestCase):
         state = SoundbarState(local=True, cloud=False)
         state.merge("cloud", {"volume_level": 0.16})
         self.assertIsNone(state.value("volume_level"))
-        state.merge("local", {"power": "on"})
-        state.transport_available["local"] = True
+        state.merge("rpc", {"power": "on"})
+        state.transport_available["rpc"] = True
         self.assertTrue(state.snapshot().available)
-        state.transport_available["local"] = False
+        state.transport_available["rpc"] = False
         self.assertFalse(state.snapshot().available)
 
     def test_older_poll_cannot_overwrite_newer_push(self):
@@ -232,7 +232,7 @@ class TestCoordinator(IsolatedAsyncioTestCase):
         await coordinator.async_refresh()
         self.assertEqual(device.sound_mode, "Surround")
         self.assertEqual(
-            coordinator.state.diagnostics()["sound_mode"]["source"], "local"
+            coordinator.state.diagnostics()["sound_mode"]["source"], "rpc"
         )
 
     async def test_fast_field_error_preserves_other_values_without_refreshing_ttl(self):
@@ -242,14 +242,14 @@ class TestCoordinator(IsolatedAsyncioTestCase):
 
         device, coordinator = self.make_device(CONTROL_MODE_LOCAL_ONLY)
         await coordinator.async_refresh()
-        previous = coordinator.state.records["local"]["input_source"].observed_at
+        previous = coordinator.state.records["rpc"]["input_source"].observed_at
         self.rpc.input_source.side_effect = LocalRpcMethodNotFoundError("unsupported", code=-32601)
         self.rpc.volume.return_value = 9
         self.now = 3
         await coordinator.async_refresh()
         self.assertTrue(device.available)
         self.assertEqual(device.volume_level, 0.09)
-        self.assertEqual(coordinator.state.records["local"]["input_source"].observed_at, previous)
+        self.assertEqual(coordinator.state.records["rpc"]["input_source"].observed_at, previous)
         self.now = 125
         await device.update_local_input_source(min_age=None)
         self.assertIsNone(coordinator.state.value("input_source"))
@@ -362,7 +362,7 @@ class TestCoordinator(IsolatedAsyncioTestCase):
         listener = MagicMock()
         unsubscribe = coordinator.async_add_listener(listener)
         unsubscribe()
-        coordinator.receive("local", {"volume_level": 0.09})
+        coordinator.receive("rpc", {"volume_level": 0.09})
         listener.assert_not_called()
         await coordinator.async_shutdown()
         self.assertTrue(coordinator._shutdown_requested)
@@ -371,13 +371,13 @@ class TestCoordinator(IsolatedAsyncioTestCase):
         device, coordinator = self.make_device(CONTROL_MODE_LOCAL_ONLY)
         await coordinator.async_refresh()
         self.now = 122
-        coordinator.transport_changed("local", False)
+        coordinator.transport_changed("rpc", False)
         sensor = VolumeSensor(device, "volume_level", "mdi:volume-high")
         self.assertIsNone(device.volume_level)
         self.assertIsNone(sensor.native_value)
         self.assertFalse(device.available)
         self.assertTrue(
-            coordinator.diagnostics()["fields"]["volume_level"]["readbacks"]["local"][
+            coordinator.diagnostics()["fields"]["volume_level"]["readbacks"]["rpc"][
                 "stale"
             ]
         )
@@ -462,7 +462,7 @@ class TestCoordinator(IsolatedAsyncioTestCase):
         self.assertFalse(snapshot["cloud_enabled"])
         self.assertEqual(snapshot["resolved"]["volume"]["level"], 0.08)
         self.assertEqual(
-            snapshot["coordinator"]["fields"]["volume_level"]["source"], "local"
+            snapshot["coordinator"]["fields"]["volume_level"]["source"], "rpc"
         )
         self.assertNotIn("execute_status", snapshot)
         self.assertEqual(snapshot["raw_status"], {})

@@ -21,6 +21,14 @@ def register_device_update_listener(
     coordinator = device.coordinator
 
     def available_for(entity):
+        ocf_fields = getattr(entity, "_soundbar_ocf_fields", ())
+        if isinstance(ocf_fields, (tuple, list)) and ocf_fields:
+            return coordinator is not None and all(
+                coordinator.ocf_field_available(key) for key in ocf_fields
+            ) and (
+                not getattr(entity, "_soundbar_requires_on", False)
+                or device.state in ("on", "playing", "paused")
+            )
         if getattr(entity, "_soundbar_local_only", False):
             local_available = (
                 coordinator.state.snapshot().local_available

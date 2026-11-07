@@ -52,4 +52,8 @@ jobs:
           custom_components/samsung_soundbar/local_ocf.py
           custom_components/samsung_soundbar/ocf_credentials.py
           custom_components/samsung_soundbar/ocf_repairs.py
+          custom_components/samsung_soundbar/ocf_state.py
+          custom_components/samsung_soundbar/state.py
+          custom_components/samsung_soundbar/coordinator.py
           tests/test_local_ocf.py tests/test_ocf_credentials.py
+          tests/test_ocf_state.py

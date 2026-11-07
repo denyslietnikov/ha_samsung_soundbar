@@ -20,13 +20,19 @@ from pysmartthings.exceptions import (
 
 from .cloud_errors import CloudAccessError, CloudRateLimitError
 from .cloud_repairs import get_cloud_repairs
+from .const import CONF_LOCAL_FALLBACK_TO_CLOUD
+from .entry_options import get_entry_option
+from .local_ocf import OcfError
 from .local_rpc import LocalRpcError
+from .ocf_credentials import async_complete
+from .ocf_state import OCF_FIELDS, POLL_HREFS, RESOURCE_FIELDS, project_ocf
 from .state import SoundbarState, StateSnapshot
 
 LOGGER = logging.getLogger(__name__)
 LOCAL_INTERVAL = timedelta(seconds=2)
 CLOUD_INTERVAL = timedelta(seconds=15)
 FULL_LOCAL_INTERVAL = 60.0
+OCF_INTERVAL = 30.0
 
 
 def coordinated_command(expected=None, *, cloud_only=False, read_fields=()):
@@ -77,6 +83,10 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         self._batching = False
         self._last_cycle_finished = float("-inf")
         self._force_refresh = False
+        self.ocf = None
+        self._ocf_task = None
+        self._next_ocf = 0.0
+        self._ocf_resources = {}
         device.coordinator = self
 
     @property
@@ -94,6 +104,7 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         self.publish()
 
     def transport_changed(self, source, available):
+        source = "rpc" if source == "local" else source
         self.state.transport_available[source] = available
         self.publish()
 
@@ -105,9 +116,10 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             self._batching = True
             try:
                 if self._force_refresh:
-                    self._next_cloud = self._next_full_local = 0.0
+                    self._next_cloud = self._next_full_local = self._next_ocf = 0.0
                     self._force_refresh = False
                 now = self._clock()
+                self._schedule_ocf()
                 if self.device.hybrid_mode:
                     if now >= self._next_full_local:
                         await self.device.update_local_status(min_age=None)
@@ -164,9 +176,173 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             self.config_entry.async_start_reauth(self.hass)
 
     async def async_refresh_all(self):
-        """Force both configured tiers for an explicit diagnostic snapshot."""
+        """Refresh configured tiers and await the shared OCF diagnostic sweep."""
         self._force_refresh = True
         await self.async_refresh()
+        if self._ocf_task is not None:
+            await asyncio.shield(self._ocf_task)
+
+    def configure_ocf(self, client):
+        """Attach the optional transport to this coordinator, never per entity."""
+        self.ocf = client
+        self.state.use_ocf = client is not None and self.device.hybrid_mode
+        self.state.ocf_cloud_fallback = bool(
+            get_entry_option(self.config_entry, CONF_LOCAL_FALLBACK_TO_CLOUD)
+        )
+        self._next_ocf = 0.0
+        self._schedule_ocf()
+
+    def _schedule_ocf(self):
+        if (
+            not self.state.use_ocf
+            or self._shutdown_requested
+            or self._clock() < self._next_ocf
+            or self._ocf_task is not None
+            and not self._ocf_task.done()
+        ):
+            return
+        # The owned task avoids making optional DTLS timeouts block the 2s RPC tier.
+        self._ocf_task = self.hass.async_create_task(self._poll_ocf())
+
+    async def _poll_ocf(self):
+        try:
+            for href in POLL_HREFS:
+                async with self._write_lock:
+                    if self._shutdown_requested:
+                        return
+                    kind = await self._read_ocf(href)
+                if kind in {"auth", "identity", "transport", "backoff", "closed"}:
+                    break
+        finally:
+            self._next_ocf = self._clock() + OCF_INTERVAL
+            self.publish()
+
+    async def _read_ocf(self, href):
+        observed_at = self._clock()
+        try:
+            payload = await self.ocf.async_read(href)
+            if not isinstance(payload, dict):
+                raise OcfError("malformed")
+            projection = project_ocf(href, payload)
+        except OcfError as error:
+            self._ocf_resources[href] = {"last_error": error.kind, "supported": None}
+            self.state.ocf_unavailable_fields.update(RESOURCE_FIELDS[href])
+            self.transport_changed("ocf", bool(self.ocf.available))
+            return error.kind
+        if projection.supported is False:
+            self.state.invalidate("ocf", RESOURCE_FIELDS[href])
+            self.state.ocf_unavailable_fields.update(RESOURCE_FIELDS[href])
+        else:
+            self.state.ocf_unavailable_fields.difference_update(RESOURCE_FIELDS[href])
+        self.state.invalidate("ocf", projection.invalidated)
+        self.state.ocf_unavailable_fields.update(projection.invalidated)
+        self._ocf_resources[href] = {
+            "last_error": None,
+            "supported": projection.supported,
+        }
+        self.state.transport_available["ocf"] = bool(self.ocf.available)
+        self.receive("ocf", projection.values, observed_at=observed_at)
+        return None
+
+    async def async_ocf_snapshot(self, hrefs=POLL_HREFS):
+        """Read only the fixed audio projection, never return raw OCF responses."""
+        hrefs = tuple(hrefs)
+        if len(hrefs) > len(POLL_HREFS) or any(
+            href not in POLL_HREFS for href in hrefs
+        ):
+            raise OcfError("unverified")
+        if hrefs and self.ocf is not None and self.state.use_ocf:
+            # Join the current sweep, then serialize explicitly requested reads.
+            if self._ocf_task is not None and not self._ocf_task.done():
+                await asyncio.shield(self._ocf_task)
+            async with self._write_lock:
+                for href in dict.fromkeys(hrefs):
+                    if self._shutdown_requested:
+                        break
+                    kind = await self._read_ocf(href)
+                    if kind in {"auth", "identity", "transport", "backoff", "closed"}:
+                        break
+        return self.ocf_diagnostics()
+
+    def ocf_diagnostics(self):
+        now = self._clock()
+        records = self.state.records["ocf"]
+        return {
+            "configured": self.ocf is not None,
+            "transport": self.ocf.diagnostics() if self.ocf is not None else {},
+            "resources": {
+                href: {
+                    **status,
+                    "available": any(
+                        self.ocf_field_available(key) for key in RESOURCE_FIELDS[href]
+                    ),
+                }
+                for href, status in self._ocf_resources.items()
+            },
+            "values": {
+                key: record.value
+                for key, record in records.items()
+                if key in OCF_FIELDS and record.fresh(now)
+            },
+            "fields": {
+                key: value
+                for key, value in self.state.diagnostics().items()
+                if key in OCF_FIELDS
+            },
+        }
+
+    def ocf_field_available(self, key):
+        if self.ocf is None or not self.state.use_ocf or not self.ocf.available:
+            return False
+        href = next(
+            (href for href, fields in RESOURCE_FIELDS.items() if key in fields), None
+        )
+        status = self._ocf_resources.get(href, {})
+        record = self.state.records["ocf"].get(key)
+        return (
+            status.get("last_error") is None
+            and status.get("supported") is not False
+            and record is not None
+            and record.fresh(self._clock())
+        )
+
+    async def async_write_ocf(self, href, payload):
+        """Internal verified-route command; never an arbitrary public POST action."""
+        if self.ocf is None or not self.state.use_ocf or href not in RESOURCE_FIELDS:
+            raise OcfError("unverified")
+        async with self._write_lock, self._poll_lock:
+            if self._shutdown_requested:
+                raise OcfError("closed")
+            try:
+                result = await self.ocf.async_write(href, payload)
+                # No optimistic success and no other-transport replay, even on timeout.
+                await self._read_ocf(href)
+                return result
+            except OcfError as error:
+                self._ocf_resources[href] = {
+                    "last_error": error.kind,
+                    "supported": None,
+                }
+                self.state.ocf_unavailable_fields.update(RESOURCE_FIELDS[href])
+                self.transport_changed("ocf", bool(self.ocf.available))
+                raise
+            finally:
+                self.publish()
+
+    async def async_shutdown(self):
+        await super().async_shutdown()
+        if self._ocf_task is not None and not self._ocf_task.done():
+            self._ocf_task.cancel()
+
+            async def drain():
+                try:
+                    await self._ocf_task
+                except asyncio.CancelledError:
+                    pass
+
+            _, cancelled = await async_complete(drain())
+            if cancelled:
+                raise asyncio.CancelledError
 
     async def async_write(self, action, expected, *, cloud_only=False, read_fields=()):
         async with self._write_lock, self._poll_lock:
@@ -176,6 +352,9 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
                 result = await action()
                 self.state.expect(
                     expected,
+                    source="cloud"
+                    if cloud_only or not self.device.hybrid_mode
+                    else "rpc",
                     write_only=cloud_only
                     and bool(expected)
                     and set(expected)
@@ -215,4 +394,5 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         return {
             "fields": self.state.diagnostics(),
             "transports": dict(self.state.transport_available),
+            "ocf": self.ocf_diagnostics(),
         }

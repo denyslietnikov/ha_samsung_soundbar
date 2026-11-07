@@ -22,6 +22,17 @@ def hass_storage():
     return {}
 
 
+@pytest.fixture(autouse=True)
+def no_ocf_network():
+    from custom_components.samsung_soundbar.local_ocf import OcfError
+
+    with patch(
+        "custom_components.samsung_soundbar.local_ocf.LocalSoundbarOcfClient.async_read",
+        new=AsyncMock(side_effect=OcfError("transport")),
+    ):
+        yield
+
+
 def bundle(key=PSK):
     return json.dumps(
         {

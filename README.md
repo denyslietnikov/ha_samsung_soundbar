@@ -140,8 +140,9 @@ recommended. Actual router/device address changes still need field-testing.
 
 Q800F research has confirmed authenticated local OCF access and Woofer
 read/write/readback. **OCF credential import and storage are available in the
-integration options. OCF-backed polling and additional controls are a later
-stage; existing RPC controls are unchanged.** The offline extractor below only validates or explicitly exports
+integration options. OCF audio-setting reads now feed the shared coordinator;
+new OCF-backed controls are a later stage. Existing RPC controls are unchanged.**
+The offline extractor below only validates or explicitly exports
 an existing credential from a selected local file. It makes no network requests
 and cannot prove that the credential still authenticates. The optional Q800F
 launcher adds read-only LAN authentication. Neither tool pairs/resets the soundbar.
@@ -173,12 +174,41 @@ on the next load. The recovery record is removed after a verified commit/recover
 No plaintext credential export service is provided.
 
 Credentials survive reload, restart, Cloud reauth and mode changes. Pure Cloud
-mode retains but does not use them. Optional OCF starts lazily, so an offline
-soundbar or invalid credential does not block working RPC controls. Local OCF
+mode retains but does not use them. Optional OCF polling starts in the background,
+so an offline soundbar or invalid credential does not block RPC setup or its fast
+polling tier. Local OCF
 Repairs offer import, not Samsung OAuth reauthentication. If a Store is damaged,
 back up your credential, use **Forget local credential**, then import again.
 Forget requires confirmation and removes only this entry's HA copy; it does not
 reset/revoke the soundbar's key. Deleting the integration entry removes its Store.
+
+### OCF Readback and Diagnostics
+
+After a validated import, the existing coordinator runs one bounded audio-resource
+sweep per entry, with 30 seconds between completed sweeps. RPC still owns power,
+volume, mute, input and sound mode. OCF owns its known audio-setting readbacks;
+missing/null values do not refresh freshness, and readbacks expire after 120
+seconds. Hybrid may use fresh Cloud fallback for these fields only when the
+existing fallback option is enabled. A transport error is not a confirmed Off.
+
+Existing Cloud-only controls are not made locally writable by this step. The
+Woofer slider and additional local switches still require their verified write
+profiles. Unknown EQ/channel shapes and enums are omitted rather than guessed.
+
+Use this read-only action to inspect the saved entry's audio settings:
+
+```yaml
+action: samsung_soundbar.dump_ocf_status
+data: {}
+```
+
+An optional `hrefs` list selects a subset of the fixed audio allowlist; an empty
+list returns cached diagnostics. With multiple soundbars, add the HA `device_id`.
+The response includes projected audio values, resource errors/support, and
+per-field source/age/TTL, never raw OCF payloads, PSK or client/device OCF UUIDs.
+`dump_discovery_snapshot` also includes this safe OCF section. Coordinator source
+names are now `rpc`, `ocf`, `cloud`; the legacy top-level `local` section remains
+RPC diagnostics. No OBSERVE subscription or arbitrary OCF POST service is exposed.
 
 ### Already Copied the Hashed Q800F Store?
 

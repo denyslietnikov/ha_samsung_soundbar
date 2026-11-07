@@ -83,12 +83,13 @@ from .const import (
     SERVICE_DUMP_DISCOVERY_SNAPSHOT,
     SERVICE_DUMP_EXECUTE_PAYLOAD,
     SERVICE_DUMP_LOCAL_RPC,
+    SERVICE_DUMP_OCF_STATUS,
     SERVICE_DUMP_STATUS_SUMMARY,
 )
 from .coordinator import SoundbarCoordinator
 from .entry_options import get_entry_option
 from .local_device import LocalDevice
-from .local_ocf import LocalSoundbarOcfClient
+from .local_ocf import LocalSoundbarOcfClient, OcfError
 from .local_rpc import (
     DEFAULT_LOCAL_RPC_METHODS,
     DEFAULT_LOCAL_RPC_PORT,
@@ -99,6 +100,7 @@ from .local_rpc import (
 from .models import SoundbarConfigEntry, SoundbarRuntimeData
 from .ocf_credentials import OcfCredentialError, OcfCredentialStore
 from .ocf_repairs import update_ocf_issue
+from .ocf_state import POLL_HREFS
 from .services import async_register_entity_services
 from .subscription import async_remove_subscription, async_setup_subscription
 
@@ -120,6 +122,13 @@ DUMP_STATUS_SUMMARY_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_HA_DEVICE_ID): cv.string,
         vol.Optional(CONF_INCLUDE_NULL, default=False): cv.boolean,
+    }
+)
+
+DUMP_OCF_STATUS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_HA_DEVICE_ID): cv.string,
+        vol.Optional("hrefs"): vol.All(cv.ensure_list, vol.Length(max=len(POLL_HREFS)), [vol.In(POLL_HREFS)]),
     }
 )
 
@@ -464,6 +473,7 @@ async def _async_setup_ocf(hass, entry):
         credential,
         on_error=partial(update_ocf_issue, hass, entry),
     )
+    entry.runtime_data.coordinator.configure_ocf(entry.runtime_data.ocf)
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> None:
@@ -481,6 +491,14 @@ async def async_reload_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) ->
 
 def _async_register_services(hass: HomeAssistant) -> None:
     """Register integration-level services once."""
+    if not hass.services.has_service(DOMAIN, SERVICE_DUMP_OCF_STATUS):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_DUMP_OCF_STATUS,
+            _async_create_dump_ocf_status_service(hass),
+            schema=DUMP_OCF_STATUS_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
     if not hass.services.has_service(DOMAIN, SERVICE_DUMP_EXECUTE_PAYLOAD):
         hass.services.async_register(
             DOMAIN,
@@ -586,6 +604,17 @@ def _async_create_dump_discovery_snapshot_service(hass: HomeAssistant):
         )
 
     return async_dump_discovery_snapshot
+
+
+def _async_create_dump_ocf_status_service(hass: HomeAssistant):
+    async def async_dump_ocf_status(call: ServiceCall) -> ServiceResponse:
+        device = _async_resolve_service_device(hass, call.data.get(CONF_HA_DEVICE_ID))
+        try:
+            return await device.coordinator.async_ocf_snapshot(call.data.get("hrefs", POLL_HREFS))
+        except OcfError:
+            raise HomeAssistantError("Local OCF diagnostic request could not be completed") from None
+
+    return async_dump_ocf_status
 
 
 def _async_create_dump_local_rpc_service(hass: HomeAssistant):

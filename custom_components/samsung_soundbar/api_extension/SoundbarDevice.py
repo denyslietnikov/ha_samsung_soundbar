@@ -40,6 +40,7 @@ from ..local_rpc import (
     LocalSoundbarRpcClient,
     split_local_readback,
 )
+from ..ocf_state import OCF_FIELDS
 from .const import RearSpeakerMode, SpeakerIdentifier
 
 log = logging.getLogger(__name__)
@@ -422,7 +423,7 @@ class SoundbarDevice:
     @property
     def local_available(self) -> bool:
         if self.coordinator is not None:
-            return self.coordinator.state.transport_available["local"]
+            return self.coordinator.state.transport_available["rpc"]
         return self.__local_available
 
     @property
@@ -529,7 +530,7 @@ class SoundbarDevice:
             )
             self.__local_last_error = str(err)
             if self.coordinator is not None:
-                self.coordinator.transport_changed("local", False)
+                self.coordinator.transport_changed("rpc", False)
             if self.hybrid_mode and was_available != self.__local_available:
                 self.__notify_update_listeners()
             log.debug(
@@ -603,7 +604,7 @@ class SoundbarDevice:
                 )
                 self.__local_last_error = str(err)
                 if self.coordinator is not None:
-                    self.coordinator.transport_changed("local", False)
+                    self.coordinator.transport_changed("rpc", False)
                 if self.hybrid_mode and was_available != self.__local_available:
                     self.__notify_update_listeners()
                 log.debug(
@@ -692,7 +693,7 @@ class SoundbarDevice:
             self.__local_available = False
             self.__local_last_error = str(err)
             if self.coordinator is not None:
-                self.coordinator.transport_changed("local", False)
+                self.coordinator.transport_changed("rpc", False)
             log.warning(
                 "[%s] Local RPC failed during %s for %s: %s",
                 DOMAIN,
@@ -735,8 +736,8 @@ class SoundbarDevice:
                 values[f"local_{key}"] = value
         if readback.get("power") == "powerOff":
             values["sound_from_detail_name"] = ""
-        self.coordinator.state.transport_available["local"] = True
-        self.coordinator.receive("local", values)
+        self.coordinator.state.transport_available["rpc"] = True
+        self.coordinator.receive("rpc", values)
 
     def __capture_cloud_state(
         self, attribute: str | None = None, *, observed_at: float | None = None
@@ -848,14 +849,16 @@ class SoundbarDevice:
         except LocalRpcError as err:
             self.__local_available = False
             self.__local_last_error = str(err)
-            self.coordinator.transport_changed("local", False)
+            self.coordinator.transport_changed("rpc", False)
             raise
 
     def __coordinated_value(self, key: str, default=None):
         record = self.coordinator.state.resolve(key)
+        if record is None and self.coordinator.state.use_ocf and key in OCF_FIELDS:
+            return None
         if (
             record is not None
-            and record.source != "local"
+            and record.source not in ("rpc", "ocf")
             and self.cloud_feature_disabled(*CLOUD_FIELD_CAPABILITIES.get(key, ()))
         ):
             return default
@@ -1504,7 +1507,7 @@ class SoundbarDevice:
                 self.__local_available = False
                 self.__local_last_error = str(err)
                 if self.coordinator is not None:
-                    self.coordinator.transport_changed("local", False)
+                    self.coordinator.transport_changed("rpc", False)
                 else:
                     self.__notify_update_listeners()
             raise HomeAssistantError(f"Local Woofer command failed: {err}") from err
@@ -1763,7 +1766,11 @@ class SoundbarDevice:
         return self.__woofer_level
 
     @property
-    def woofer_connection(self) -> str:
+    def woofer_connection(self) -> str | None:
+        if self.coordinator is not None:
+            return self.__coordinated_value(
+                "woofer_connection", self.__woofer_connection
+            )
         return self.__woofer_connection
 
     @coordinated_command(lambda self, level: {"woofer_level": level}, cloud_only=True)
@@ -1970,7 +1977,7 @@ class SoundbarDevice:
     # ------------- ADVANCED AUDIO ---------------
 
     @property
-    def night_mode(self) -> bool:
+    def night_mode(self) -> bool | None:
         if self.coordinator is not None:
             return self.__coordinated_value("night_mode", False)
         return True if self.__night_mode == 1 else False
@@ -1985,7 +1992,7 @@ class SoundbarDevice:
         self.__night_mode = 1 if value else 0
 
     @property
-    def bass_mode(self) -> bool:
+    def bass_mode(self) -> bool | None:
         if self.coordinator is not None:
             return self.__coordinated_value("bass_mode", False)
         return True if self.__bass_mode == 1 else False
@@ -2000,7 +2007,7 @@ class SoundbarDevice:
         self.__bass_mode = 1 if value else 0
 
     @property
-    def voice_amplifier(self) -> bool:
+    def voice_amplifier(self) -> bool | None:
         if self.coordinator is not None:
             return self.__coordinated_value("voice_amplifier", False)
         return True if self.__voice_amplifier == 1 else False
@@ -2017,7 +2024,7 @@ class SoundbarDevice:
         self.__voice_amplifier = 1 if value else 0
 
     @property
-    def virtual_sound(self) -> bool:
+    def virtual_sound(self) -> bool | None:
         if self.coordinator is not None:
             return self.__coordinated_value("virtual_sound", False)
         return True if self.__virtual_sound == 1 else False
@@ -2438,6 +2445,10 @@ class SoundbarDevice:
                 "status": self.__json_safe(self.__local_status),
             },
             "resolved": self.retrieve_data,
+            "ocf": (
+                self.coordinator.ocf_diagnostics()
+                if self.coordinator is not None else {"configured": False}
+            ),
             "coordinator": (
                 self.coordinator.diagnostics() if self.coordinator is not None else None
             ),

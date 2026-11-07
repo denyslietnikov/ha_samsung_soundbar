@@ -122,7 +122,7 @@ async def test_failed_fast_getter_does_not_refresh_its_old_ttl(hass, entry, tran
     await hass.async_block_till_done()
     device = entry.runtime_data.device
     state = device.coordinator.state
-    old = state.records["local"]["input_source"]
+    old = state.records["rpc"]["input_source"]
     transports.rpc.input_source.side_effect = LocalRpcMethodNotFoundError(
         "unsupported", code=-32601
     )
@@ -130,7 +130,7 @@ async def test_failed_fast_getter_does_not_refresh_its_old_ttl(hass, entry, tran
     await device.update_local_input_source(min_age=None)
     assert device.available
     assert device.volume_level == 0.09
-    assert state.records["local"]["input_source"] == old
+    assert state.records["rpc"]["input_source"] == old
     now = state.clock()
     state.clock = lambda: now + 125
     assert state.value("input_source") is None

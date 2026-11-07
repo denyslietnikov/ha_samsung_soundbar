@@ -259,6 +259,31 @@ dump_status_summary:
       selector:
         boolean:
 
+dump_ocf_status:
+  name: Dump local OCF status
+  description: Read known audio settings through the saved OCF credential. Returns projected values and freshness, never raw responses or secrets. Does not change device settings.
+  fields:
+    device_id:
+      name: Device
+      description: Samsung Soundbar device. Required only when multiple soundbars are loaded.
+      selector:
+        device:
+          integration: samsung_soundbar
+    hrefs:
+      name: Audio resources
+      description: Optional subset of the fixed audio-resource allowlist. Empty list returns cached diagnostics without new reads.
+      selector:
+        select:
+          multiple: true
+          options:
+            - /sec/networkaudio/woofer
+            - /sec/networkaudio/advancedaudio
+            - /sec/networkaudio/spacefitSound
+            - /sec/networkaudio/tone
+            - /sec/networkaudio/eq
+            - /sec/networkaudio/channelVolume
+            - /sec/networkaudio/audiosync
+
 dump_discovery_snapshot:
   name: Dump discovery snapshot
   description: Return a raw and flattened SmartThings status snapshot for before/after feature discovery.

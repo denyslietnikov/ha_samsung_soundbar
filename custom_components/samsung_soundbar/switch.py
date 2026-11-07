@@ -112,12 +112,13 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
 
     # ------ STATE FUNCTIONS --------
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         if (
             self.__device.coordinator is not None
             or self.__device.has_advanced_audio_state
         ):
-            return bool(self.__state_function())
+            value = self.__state_function()
+            return None if value is None else bool(value)
         return bool(self.__state)
 
     async def async_turn_off(self):
