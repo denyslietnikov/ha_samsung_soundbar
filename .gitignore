@@ -7,7 +7,11 @@ __pycache__/
 config
 .vscode
 .ruff_cache
+.venv-ocf/
 
+ocf-secrets/
+*.ocf-credential.json
+oic_svr_db_client.dat
 
 # C extensions
 *.so

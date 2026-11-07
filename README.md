@@ -136,6 +136,179 @@ still need a manual host change in Options. Failed identity checks leave the
 old address unchanged; a later DHCP event can retry. A DHCP reservation remains
 recommended. Actual router/device address changes still need field-testing.
 
+## Optional OCF Credential Recovery
+
+Q800F research has confirmed authenticated local OCF access and Woofer
+read/write/readback. **OCF credential import and storage are available in the
+integration options. OCF-backed polling and additional controls are a later
+stage; existing RPC controls are unchanged.** The offline extractor below only validates or explicitly exports
+an existing credential from a selected local file. It makes no network requests
+and cannot prove that the credential still authenticates. The optional Q800F
+launcher adds read-only LAN authentication. Neither tool pairs/resets the soundbar.
+Do not delete your existing integration or remove the soundbar from SmartThings.
+
+### Import the Saved Credential into Home Assistant
+
+1. Install the updated integration and restart HA. HA installs the pinned
+   `smartthings-local` dependency automatically; do not install the tool venv in HA.
+2. In the existing soundbar entry, save **Local only** or **Hybrid** with the
+   working host first. Older Hybrid entries should save Options once to record
+   the physical device identity. Do not remove/re-add the soundbar.
+3. Reopen Options, select **Import or replace credential** under **Local OCF
+   credential**, then submit. This action does not save other changes in that form.
+4. Paste the full contents of `q800f.ocf-credential.json` into the masked field,
+   locally in HA, and submit. Never paste the credential into chat or an issue.
+   Identity and DTLS authentication are checked without changing soundbar settings.
+
+The PSK and both UUIDs are stored in a private, atomic HA Store under
+`.storage/samsung_soundbar.ocf.<entry_id>` with file permissions `0600`, not in
+config-entry data, Options, entity state or diagnostic output. This is **not
+encryption**: anyone with filesystem/root access to HA can read it. Keep your
+independent encrypted backup and HA backup emergency kit.
+
+Replacement is serialized with other imports and removal. A private `.rollback`
+Store temporarily retains the previous credential until a disk-verified commit;
+failed or cancelled writes restore it, and an interrupted transaction is recovered
+on the next load. The recovery record is removed after a verified commit/recovery.
+No plaintext credential export service is provided.
+
+Credentials survive reload, restart, Cloud reauth and mode changes. Pure Cloud
+mode retains but does not use them. Optional OCF starts lazily, so an offline
+soundbar or invalid credential does not block working RPC controls. Local OCF
+Repairs offer import, not Samsung OAuth reauthentication. If a Store is damaged,
+back up your credential, use **Forget local credential**, then import again.
+Forget requires confirmation and removes only this entry's HA copy; it does not
+reset/revoke the soundbar's key. Deleting the integration entry removes its Store.
+
+### Already Copied the Hashed Q800F Store?
+
+Use `scripts/recover_q800f_credential.py` directly with the copied file; no
+renaming, new backup, Manifest lookup or manual UUID input is needed. This
+launcher requires Python 3.11+ (tested with 3.14). It reads the live Q800F UUID,
+selects that device's credential and checks
+PSK authentication against the protected `/oic/d` identity. Only then can it
+export. The host must be a numeric LAN IP; keep the soundbar reachable.
+
+Run these commands from the repository root. `.venv-ocf` is a dedicated local
+environment for the recovery tools, separate from Home Assistant's environment.
+
+```sh
+python3 -m venv .venv-ocf
+.venv-ocf/bin/python -m pip install -r scripts/requirements-ocf-recovery.txt
+.venv-ocf/bin/python scripts/recover_q800f_credential.py \
+  --store /path/to/copied/f838d92eedf51cc435481f58169d8288cc505895 \
+  --host 192.0.2.26
+```
+
+Without `--output`, it prints only whether the Q800F credential authenticated.
+To save a portable file explicitly, append
+`--output "$HOME/q800f.ocf-credential.json"`. The same private, atomic,
+no-overwrite export is used. **The output is plaintext and needs external
+encryption before archiving.** No device settings or ownership are changed.
+
+### Find the Store in a Completed iPhone Backup
+
+Use a completed, unencrypted Finder backup from an iPhone whose SmartThings app
+already controls the soundbar. This route was verified on one Q800F; another
+phone/app version or an encrypted backup may have a different outcome. Never
+upload a whole phone backup to HA, a web extractor, an issue or an AI chat.
+
+The backup index identifies the file by:
+
+- domain: `AppDomain-com.samsung.oneconnect4ios`
+- relative path: `Library/Security/oic_svr_db_client.dat`
+
+Query a **static copy** of `Manifest.db`, replacing the path below:
+
+```sql
+SELECT fileID, substr(fileID, 1, 2) || '/' || fileID AS backup_path
+FROM Files
+WHERE domain = 'AppDomain-com.samsung.oneconnect4ios'
+  AND relativePath = 'Library/Security/oic_svr_db_client.dat';
+```
+
+For example, run `sqlite3 -readonly
+'file:/path/to/copied/Manifest.db?mode=ro&immutable=1'` and enter the query.
+The result names the hashed file to copy from the original backup's two-character
+subdirectory. `immutable=1` is only for a completed, unchanged snapshot: it does
+not bypass macOS privacy permissions, decrypt a backup or recover missing WAL
+transactions. If macOS denies access, use Finder to copy the completed files
+or explicitly grant your terminal Full Disk Access; do not modify the original
+backup's permissions. Keep the copied store private: it can contain credentials
+for other devices as well.
+
+You also need the soundbar's **OCF device UUID**, obtained from a trusted
+read-only `/oic/d` probe. It is not the SmartThings cloud device ID, the Tizen
+DUID or the client/owner UUID. This offline tool deliberately does not discover
+the device or print any UUIDs.
+
+### Validate or Export Only the Selected Device
+
+Run from the repository root on macOS/Linux with Python 3.10+ (tested with
+Python 3.14). Install the separate tool dependency, not the OCF runtime in HA:
+
+```sh
+python3 -m venv .venv-ocf
+.venv-ocf/bin/python -m pip install -r scripts/requirements-ocf.txt
+.venv-ocf/bin/python scripts/extract_ocf_credential.py \
+  --store /path/to/copied/oic_svr_db_client.dat \
+  --target-device-uuid YOUR_OCF_DEVICE_UUID
+```
+
+Without `--output`, this only validates structure and exact-device matching in
+memory. It does not save or print the PSK or identities. Exactly one matching
+`credtype=1` record is required. The client identity comes from `cred.rowneruuid`,
+not the selected device UUID. Raw/base64 PSKs of 16 or 32 bytes are supported.
+
+To explicitly export, first create a private directory **outside the repository**:
+
+```sh
+mkdir -m 700 "$HOME/q800f-recovery"
+.venv-ocf/bin/python scripts/extract_ocf_credential.py \
+  --store /path/to/copied/oic_svr_db_client.dat \
+  --target-device-uuid YOUR_OCF_DEVICE_UUID \
+  --output "$HOME/q800f-recovery/q800f.ocf-credential.json"
+```
+
+The new file has permissions `0600`. A private temporary directory is used until
+the complete file is ready; atomic publication requires a local filesystem with
+hard-link support and fails safely if unsupported. Existing files and symlinks
+are never overwritten. Only schema version, target device UUID, client identity UUID,
+encoding and PSK are exported; other device records are excluded. A previously
+exported bundle can be validated offline without decoding the original store:
+
+```sh
+.venv-ocf/bin/python scripts/extract_ocf_credential.py \
+  --credential "$HOME/q800f-recovery/q800f.ocf-credential.json" \
+  --target-device-uuid YOUR_OCF_DEVICE_UUID
+```
+
+**This JSON is plaintext.** Permissions and base64 are not encryption. Never
+print the file, paste it into service YAML/chat, pass the PSK through command-line
+arguments/environment variables, or commit it. The repository ignores
+`ocf-secrets/`, `*.ocf-credential.json`, `oic_svr_db_client.dat` and `Manifest.db*`,
+but a differently named file can still be accidentally committed.
+
+### Preserve Access Before Updating or Resetting
+
+- Put the selected credential bundle and the original completed backup/store
+  into encrypted storage. The full store is more sensitive than the one-device
+  bundle. Keep two independent encrypted copies, including one offline, and keep
+  their password separately. Do not leave the only copy in a temporary directory.
+- Preserve **PSK + client identity UUID + target OCF UUID + schema version**;
+  the PSK alone is insufficient. Keep a known-good copy of the extraction script
+  and `scripts/requirements-ocf.txt`. Validate a restored bundle offline; a
+  separate, explicitly authorized read-only device probe is required to confirm
+  authentication. This step does not create an encrypted backup automatically.
+- Do not reset, remove/re-add or transfer ownership of the soundbar just to
+  troubleshoot. These operations may invalidate the credential. Preserve working
+  firmware/app versions in your notes; updates may change the protocol or access.
+  A phone backup is not a guarantee that an old App Store app can be reinstalled.
+- Once HA credential storage is implemented, include it in an encrypted HA
+  backup and keep the [backup emergency kit](https://www.home-assistant.io/more-info/backup-emergency-kit/)
+  outside HA. A saved PSK cannot restore a device's ACL or guarantee access after
+  a reset or incompatible firmware update.
+
 ## Feature Availability
 
 Features are created only when the device exposes the corresponding capability

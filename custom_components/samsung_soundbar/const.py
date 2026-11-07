@@ -33,6 +33,8 @@ CONF_LOCAL_IDENTITY = "local_identity"
 CONF_LOCAL_PORT = "local_port"
 CONF_LOCAL_TIMEOUT = "local_timeout"
 CONF_LOCAL_VERIFY_SSL = "local_verify_ssl"
+CONF_OCF_CONFIGURED = "ocf_configured"
+CONF_OCF_ACTION = "ocf_action"
 
 CONTROL_MODE_SMARTTHINGS_CLOUD = "smartthings_cloud"
 CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS = "hybrid_local_smartthings"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from .api_extension.SoundbarDevice import SoundbarDevice
     from .auth import SmartThingsAuthProvider
     from .coordinator import SoundbarCoordinator
+    from .local_ocf import LocalSoundbarOcfClient
     from .subscription import SmartThingsSubscriptionRuntime
 
 
@@ -27,6 +28,7 @@ class SoundbarRuntimeData:
     auth_provider: SmartThingsAuthProvider | None = None
     subscription: SmartThingsSubscriptionRuntime | None = None
     reauth_pending: bool = False
+    ocf: LocalSoundbarOcfClient | None = field(default=None, repr=False)
 
 
 type SoundbarConfigEntry = ConfigEntry[SoundbarRuntimeData]

@@ -1,3 +1,4 @@
 pytest-homeassistant-custom-component==0.13.367
 pysmartthings==4.0.3
 ruff==0.16.10
+-r scripts/requirements-ocf-recovery.txt

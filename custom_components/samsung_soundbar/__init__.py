@@ -1,4 +1,5 @@
 import logging
+from functools import partial
 from types import SimpleNamespace
 
 import voluptuous as vol
@@ -70,6 +71,7 @@ from .const import (
     CONF_LOCAL_TIMEOUT,
     CONF_LOCAL_VERIFY_SSL,
     CONF_LOCATION_ID,
+    CONF_OCF_CONFIGURED,
     CONF_PRESET,
     CONF_SUBSCRIPTION_ID,
     CONF_WRITE_PROPERTY,
@@ -86,6 +88,7 @@ from .const import (
 from .coordinator import SoundbarCoordinator
 from .entry_options import get_entry_option
 from .local_device import LocalDevice
+from .local_ocf import LocalSoundbarOcfClient
 from .local_rpc import (
     DEFAULT_LOCAL_RPC_METHODS,
     DEFAULT_LOCAL_RPC_PORT,
@@ -94,6 +97,8 @@ from .local_rpc import (
     LocalSoundbarRpcClient,
 )
 from .models import SoundbarConfigEntry, SoundbarRuntimeData
+from .ocf_credentials import OcfCredentialError, OcfCredentialStore
+from .ocf_repairs import update_ocf_issue
 from .services import async_register_entity_services
 from .subscription import async_remove_subscription, async_setup_subscription
 
@@ -186,6 +191,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> 
 async def async_remove_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> None:
     """Remove Repairs belonging to an entry which the user deleted."""
     clear_cloud_issues(hass, entry)
+    update_ocf_issue(hass, entry, None)
+    await OcfCredentialStore(hass, entry.entry_id).async_remove()
 
 
 async def _async_setup_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> bool:
@@ -343,6 +350,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) ->
     )
 
     _LOGGER.info("[%s] Device initialized successfully", DOMAIN)
+    await _async_setup_ocf(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -413,6 +421,7 @@ async def _async_setup_local_only_entry(
         config=dict(entry.data),
         options=dict(entry.options),
     )
+    await _async_setup_ocf(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -425,10 +434,36 @@ async def async_unload_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) ->
     if unload_ok:
         runtime = entry.runtime_data
         await runtime.coordinator.async_shutdown()
+        if runtime.ocf is not None:
+            await runtime.ocf.async_close()
         if runtime.subscription is not None:
             await async_remove_subscription(entry, runtime.subscription)
         del entry.runtime_data
     return unload_ok
+
+
+async def _async_setup_ocf(hass, entry):
+    """Load credentials without delaying RPC setup with an optional DTLS handshake."""
+    update_ocf_issue(hass, entry, None)
+    if (
+        get_entry_option(entry, CONF_CONTROL_MODE)
+        not in (CONTROL_MODE_LOCAL_ONLY, CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS)
+        or entry.data.get(CONF_OCF_CONFIGURED) is not True
+    ):
+        return
+    try:
+        credential = await OcfCredentialStore(hass, entry.entry_id).async_load()
+        if credential is None:
+            raise OcfCredentialError
+    except OcfCredentialError:
+        update_ocf_issue(hass, entry, "credential")
+        return
+    entry.runtime_data.ocf = LocalSoundbarOcfClient(
+        hass,
+        str(get_entry_option(entry, CONF_LOCAL_HOST)).strip(),
+        credential,
+        on_error=partial(update_ocf_issue, hass, entry),
+    )
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) -> None:

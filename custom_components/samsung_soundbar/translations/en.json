@@ -1,5 +1,19 @@
 {
     "issues": {
+        "ocf_credential": {
+            "title": "Local OCF credential needs attention",
+            "fix_flow": {
+                "step": {
+                    "choose": {
+                        "title": "Restore local OCF access",
+                        "description": "The local OCF credential for {name} is missing, invalid or no longer authorized. Import your saved credential in the existing entry options. If local storage is damaged, back up the credential first, then use Forget local OCF credential and import again. This does not require Samsung OAuth reauthentication. Working RPC and Cloud controls are unaffected."
+                    }
+                },
+                "abort": {
+                    "reconfigure": "Continue in the local credential import form."
+                }
+            }
+        },
         "cloud_auth": {
             "title": "SmartThings authorization needs attention",
             "fix_flow": {
@@ -163,6 +177,11 @@
     },
     "options": {
         "error": {
+            "ocf_invalid": "The credential bundle is invalid or uses an unsupported format.",
+            "ocf_storage": "Credential storage could not be verified. Back up your credential before using Forget and importing again.",
+            "ocf_auth": "The credential did not authenticate the configured soundbar. The previous credential was not replaced.",
+            "ocf_connect": "Could not verify local OCF access. Check soundbar power and LAN connectivity.",
+            "ocf_local_required": "Save Local only or Hybrid mode with a working local host before importing an OCF credential.",
             "cannot_connect": "Could not connect to the local soundbar RPC API. Check the IP address, port, network, and IP Control setting.",
             "identity_unavailable": "Could not read a stable local device identity. Check access to ports 8001 or 9110.",
             "identity_mismatch": "This host belongs to a different soundbar. The existing Home Assistant device was not changed.",
@@ -172,6 +191,20 @@
             "confirm_local_identity": {
                 "title": "Confirm local soundbar",
                 "description": "Switch this existing device to local control at {host}? Local identifier: {identity}. SmartThings authorization will be removed and must be completed again to return to a cloud mode."
+            },
+            "ocf_import": {
+                "title": "Import local OCF credential",
+                "description": "Paste the complete contents of your q800f.ocf-credential.json backup. The soundbar identity and credential are verified before saving. Local storage uses restricted file permissions, not encryption. Keep an encrypted external backup; never send the credential to support.",
+                "data": {
+                    "credential_bundle": "Credential JSON"
+                }
+            },
+            "ocf_forget": {
+                "title": "Forget local OCF credential",
+                "description": "Delete only this entry's local OCF credential? Reimport requires your saved backup. This does not reset the soundbar or revoke its key. RPC settings and SmartThings authorization remain unchanged.",
+                "data": {
+                    "confirm": "Delete this entry's local OCF credential"
+                }
             },
             "init": {
                 "data": {
@@ -185,7 +218,8 @@
                     "settings_eq": "Enable EQ selector",
                     "settings_soundmode": "Enable Sound Mode selector",
                     "settings_woofer": "Enable Woofer number entity",
-                    "device_volume": "Maximum volume"
+                    "device_volume": "Maximum volume",
+                    "ocf_action": "Local OCF credential (other changes are not saved for import/forget)"
                 },
                 "description": "Choose which optional Samsung Soundbar features Home Assistant should expose. Unsupported features may be unavailable on some models.",
                 "title": "Samsung Soundbar options"
@@ -193,6 +227,13 @@
         }
     },
     "selector": {
+        "ocf_action": {
+            "options": {
+                "keep": "Keep current credential",
+                "import": "Import or replace credential",
+                "forget": "Forget local credential"
+            }
+        },
         "cloud_repair_action": {
             "options": {
                 "options": "Open control mode options",

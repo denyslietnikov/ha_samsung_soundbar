@@ -16,6 +16,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN
 from homeassistant.core import callback
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.config_entry_oauth2_flow import AbstractOAuth2FlowHandler
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
@@ -44,6 +45,8 @@ from .const import (
     CONF_LOCAL_TIMEOUT,
     CONF_LOCAL_VERIFY_SSL,
     CONF_LOCATION_ID,
+    CONF_OCF_ACTION,
+    CONF_OCF_CONFIGURED,
     CONF_SUBSCRIPTION_ID,
     CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
     CONTROL_MODE_LABELS,
@@ -60,7 +63,14 @@ from .local_identity import (
     async_read_local_identity,
     identities_match,
 )
+from .local_ocf import LocalSoundbarOcfClient, OcfError
 from .local_rpc import LocalRpcError, LocalSoundbarRpcClient
+from .ocf_credentials import (
+    OcfCredentialError,
+    OcfCredentialStore,
+    parse_credential_bundle,
+)
+from .ocf_repairs import update_ocf_issue
 from .subscription import async_remove_subscription
 
 _LOGGER = logging.getLogger(__name__)
@@ -377,6 +387,7 @@ class SamsungSoundbarConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
                 CONF_LOCAL_TIMEOUT,
                 CONF_LOCAL_IDENTITY,
                 CONF_LOCAL_FALLBACK_TO_CLOUD,
+                CONF_OCF_CONFIGURED,
             )
             if key in entry.data
         }
@@ -424,7 +435,18 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
 
         if user_input is not None:
             options = get_entry_options(self.config_entry)
-            options.update(user_input)
+            action = user_input.get(CONF_OCF_ACTION, "keep")
+            if action == "import":
+                return await self.async_step_ocf_import()
+            if action == "forget":
+                return await self.async_step_ocf_forget()
+            options.update(
+                {
+                    key: value
+                    for key, value in user_input.items()
+                    if key != CONF_OCF_ACTION
+                }
+            )
             saved = self.config_entry.options.get(
                 CONF_LOCAL_IDENTITY
             ) or self.config_entry.data.get(CONF_LOCAL_IDENTITY)
@@ -540,6 +562,136 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
             session, options[CONF_LOCAL_HOST], options[CONF_LOCAL_TIMEOUT]
         )
 
+    async def async_step_ocf_import(self, user_input=None):
+        errors = {}
+        if user_input is not None:
+            try:
+                credential = parse_credential_bundle(
+                    user_input.get("credential_bundle", "")
+                )
+            except OcfCredentialError:
+                errors["base"] = "ocf_invalid"
+            else:
+                result, error = await self._async_import_ocf(credential)
+                if result is not None:
+                    return result
+                errors["base"] = error
+        return self.async_show_form(
+            step_id="ocf_import",
+            errors=errors,
+            data_schema=vol.Schema(
+                {
+                    vol.Required("credential_bundle"): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.PASSWORD
+                        )
+                    )
+                }
+            ),
+        )
+
+    async def _async_import_ocf(self, credential):
+        store = OcfCredentialStore(self.hass, self.config_entry.entry_id)
+        async with store.configuration_lock:
+            options = get_entry_options(self.config_entry)
+            host = str(options[CONF_LOCAL_HOST]).strip()
+            saved = self.config_entry.options.get(
+                CONF_LOCAL_IDENTITY
+            ) or self.config_entry.data.get(CONF_LOCAL_IDENTITY)
+            if (
+                options[CONF_CONTROL_MODE]
+                not in (CONTROL_MODE_LOCAL_ONLY, CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS)
+                or not host
+            ):
+                return None, "ocf_local_required"
+            if not saved:
+                return None, "identity_unavailable"
+
+            def active():
+                return (
+                    self.hass.config_entries.async_get_entry(self.config_entry.entry_id)
+                    is self.config_entry
+                    and any(
+                        item["flow_id"] == self.flow_id
+                        for item in self.hass.config_entries.options.async_progress()
+                    )
+                    and str(
+                        get_entry_option(self.config_entry, CONF_LOCAL_HOST)
+                    ).strip()
+                    == host
+                    and get_entry_option(self.config_entry, CONF_CONTROL_MODE)
+                    == options[CONF_CONTROL_MODE]
+                )
+
+            client, owned = None, False
+            try:
+                if not active():
+                    raise OcfCredentialError
+                observed = await self._async_read_identity(options)
+                if not identities_match(saved, observed):
+                    raise LocalIdentityError("Local identity mismatch")
+                previous = await store.async_load()
+                if (
+                    previous is not None
+                    and previous.target_device_uuid != credential.target_device_uuid
+                ):
+                    raise OcfCredentialError
+                runtime = getattr(self.config_entry, "runtime_data", None)
+                client = runtime.ocf if runtime is not None else None
+                if client is None:
+                    client = LocalSoundbarOcfClient(self.hass, host, credential)
+                    owned = True
+                try:
+                    await client.async_validate_candidate(credential)
+                finally:
+                    if owned:
+                        await client.async_close()
+                await store.async_save(credential, expected=previous, guard=active)
+                return self._async_finish_ocf(True), None
+            except LocalIdentityError:
+                return None, "identity_mismatch"
+            except OcfCredentialError:
+                return None, "ocf_storage"
+            except OcfError as error:
+                return None, "ocf_auth" if error.kind in (
+                    "auth",
+                    "identity",
+                ) else "ocf_connect"
+
+    async def async_step_ocf_forget(self, user_input=None):
+        errors = {}
+        if user_input is not None and user_input.get("confirm") is True:
+            store = OcfCredentialStore(self.hass, self.config_entry.entry_id)
+            async with store.configuration_lock:
+                try:
+                    await store.async_remove(locked=True)
+                    runtime = getattr(self.config_entry, "runtime_data", None)
+                    if runtime is not None and runtime.ocf is not None:
+                        await runtime.ocf.async_close()
+                except (OcfCredentialError, OcfError):
+                    errors["base"] = "ocf_storage"
+                else:
+                    return self._async_finish_ocf(False)
+        return self.async_show_form(
+            step_id="ocf_forget",
+            errors=errors,
+            data_schema=vol.Schema({vol.Required("confirm", default=False): bool}),
+        )
+
+    def _async_finish_ocf(self, configured):
+        data = dict(self.config_entry.data)
+        if configured:
+            data[CONF_OCF_CONFIGURED] = True
+        else:
+            data.pop(CONF_OCF_CONFIGURED, None)
+        changed = self.hass.config_entries.async_update_entry(
+            self.config_entry, data=data
+        )
+        update_ocf_issue(self.hass, self.config_entry, None)
+        if not changed and getattr(self.config_entry, "runtime_data", None) is not None:
+            self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
+        return self.async_create_entry(title="", data=dict(self.config_entry.options))
+
     async def _async_save_options(self, options: dict[str, Any]) -> ConfigFlowResult:
         cloud_keys = {
             CONF_TOKEN,
@@ -593,6 +745,12 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
         """Return the options schema with current defaults."""
         return vol.Schema(
             {
+                vol.Optional(CONF_OCF_ACTION, default="keep"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=["keep", "import", "forget"],
+                        translation_key="ocf_action",
+                    )
+                ),
                 vol.Required(
                     CONF_CONTROL_MODE,
                     default=options[CONF_CONTROL_MODE],
