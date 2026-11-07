@@ -443,8 +443,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) ->
     if unload_ok:
         runtime = entry.runtime_data
         await runtime.coordinator.async_shutdown()
-        if runtime.ocf is not None:
-            await runtime.ocf.async_close()
         if runtime.subscription is not None:
             await async_remove_subscription(entry, runtime.subscription)
         del entry.runtime_data

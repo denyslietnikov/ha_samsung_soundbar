@@ -33,6 +33,7 @@ class TestOcfWoofer(IsolatedAsyncioTestCase):
         self.level = -6
         self.connection = "on"
         client = MagicMock()
+        client.async_close = AsyncMock()
         client.available = client.validated = True
         client.diagnostics.return_value = {"configured": True, "available": True}
         client.async_read = AsyncMock(

@@ -1,5 +1,6 @@
 """OCF joins the real HA lifecycle without duplicate entities or cloud traffic."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -66,6 +67,83 @@ async def test_polling_and_read_only_diagnostics_share_entry_transport(
     ocf.async_write.assert_not_called()
     transports.auth.assert_not_awaited()
     await hass.config_entries.async_unload(entry.entry_id)
+    ocf.async_close.assert_awaited_once()
+
+
+async def test_ocf_session_closes_on_home_assistant_stop(hass, entry, transports, ocf):
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = entry.runtime_data.coordinator
+    await hass.async_stop(force=True)
+    assert coordinator._shutdown_requested
+    assert coordinator._ocf_task.done()
+    ocf.async_close.assert_awaited_once()
+
+
+async def test_shutdown_is_shared_by_concurrent_calls_and_unload(
+    hass, entry, transports, ocf
+):
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = entry.runtime_data.coordinator
+    await asyncio.gather(coordinator.async_shutdown(), coordinator.async_shutdown())
+    ocf.async_close.assert_awaited_once()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    ocf.async_close.assert_awaited_once()
+
+
+async def test_shutdown_drains_active_ocf_poll_before_closing(
+    hass, entry, transports, ocf
+):
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = entry.runtime_data.coordinator
+    started, drained = asyncio.Event(), asyncio.Event()
+
+    async def read(href):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            drained.set()
+
+    async def close():
+        assert drained.is_set()
+
+    ocf.async_read.side_effect = read
+    ocf.async_close.side_effect = close
+    coordinator._next_ocf = 0
+    coordinator._schedule_ocf()
+    await started.wait()
+    await coordinator.async_shutdown()
+    assert coordinator._ocf_task.done()
+    ocf.async_close.assert_awaited_once()
+
+
+async def test_cancelled_shutdown_finishes_cleanup_before_propagating(
+    hass, entry, transports, ocf
+):
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = entry.runtime_data.coordinator
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def close():
+        started.set()
+        await release.wait()
+
+    ocf.async_close.side_effect = close
+    stopping = asyncio.create_task(coordinator.async_shutdown())
+    await asyncio.wait_for(started.wait(), 1)
+    stopping.cancel()
+    await asyncio.sleep(0)
+    stopping.cancel()
+    await asyncio.sleep(0)
+    assert not stopping.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await stopping
+    assert await hass.config_entries.async_unload(entry.entry_id)
     ocf.async_close.assert_awaited_once()
 
 

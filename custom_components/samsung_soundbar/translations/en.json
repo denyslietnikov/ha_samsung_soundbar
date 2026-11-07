@@ -1,4 +1,14 @@
 {
+    "entity": {
+        "switch": {
+            "moderate_bass": {
+                "name": "Moderate Bass"
+            },
+            "spacefit_sound": {
+                "name": "SpaceFit Sound"
+            }
+        }
+    },
     "issues": {
         "ocf_credential": {
             "title": "Local OCF credential needs attention",

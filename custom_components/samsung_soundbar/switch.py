@@ -77,7 +77,11 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
         )
         self.__device = device
         display_name = SWITCH_ENTITY_NAMES.get(append_unique_id, append_unique_id)
-        self._name = f"{self.__device.device_name} {display_name}"
+        if self._soundbar_audio_field in ("moderate_bass", "spacefit_sound"):
+            self._attr_has_entity_name = True
+            self._attr_translation_key = self._soundbar_audio_field
+        else:
+            self._attr_name = f"{self.__device.device_name} {display_name}"
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
         self.__base_icon = icon_string
         self._attr_device_info = build_device_info(self.__device)
@@ -88,10 +92,6 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
         self.__off_function = off_function
 
     # ---------- GENERAL ---------------
-
-    @property
-    def name(self):
-        return self._name
 
     async def async_update(self):
         if self.__device.has_advanced_audio_state:

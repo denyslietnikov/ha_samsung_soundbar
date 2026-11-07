@@ -160,6 +160,9 @@ class TestCapabilityHygiene(IsolatedAsyncioTestCase):
         hass, entry = MagicMock(), MagicMock()
         hass.loop = asyncio.get_event_loop()
         hass.is_stopping = False
+        hass.async_create_task.side_effect = lambda coro, *args: asyncio.create_task(
+            coro
+        )
         with patch.object(SoundbarCoordinator, "_schedule_refresh"):
             coordinator = SoundbarCoordinator(hass, entry, device)
             coordinator.receive("local", {"power": "on", "volume_level": 0.08})
@@ -203,6 +206,9 @@ class TestCapabilityHygiene(IsolatedAsyncioTestCase):
         hass, entry = MagicMock(), MagicMock()
         hass.loop = asyncio.get_event_loop()
         hass.is_stopping = False
+        hass.async_create_task.side_effect = lambda coro, *args: asyncio.create_task(
+            coro
+        )
         with patch.object(SoundbarCoordinator, "_schedule_refresh"):
             coordinator = SoundbarCoordinator(hass, entry, device)
             coordinator.transport_changed("cloud", True)

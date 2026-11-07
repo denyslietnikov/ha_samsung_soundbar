@@ -6,6 +6,8 @@ from datetime import timedelta
 from functools import wraps
 from time import monotonic
 
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import Event
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -87,6 +89,8 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         self._ocf_task = None
         self._next_ocf = 0.0
         self._ocf_resources = {}
+        self._shutdown_task = None
+        self._unsub_stop = None
         device.coordinator = self
 
     @property
@@ -185,6 +189,11 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
     def configure_ocf(self, client):
         """Attach the optional transport to this coordinator, never per entity."""
         self.ocf = client
+        if client is not None and self._unsub_stop is None:
+            self._unsub_stop = self.hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STOP, self._async_handle_stop
+            )
+            self.config_entry.async_on_unload(self._unsub_stop)
         self.state.use_ocf = client is not None and self.device.hybrid_mode
         self.state.ocf_cloud_fallback = bool(
             get_entry_option(self.config_entry, CONF_LOCAL_FALLBACK_TO_CLOUD)
@@ -371,19 +380,34 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
                 self.publish()
 
     async def async_shutdown(self):
-        await super().async_shutdown()
-        if self._ocf_task is not None and not self._ocf_task.done():
-            self._ocf_task.cancel()
+        """Share one cancellation-safe cleanup across stop and entry unload."""
+        if self._shutdown_task is None:
+            self._shutdown_requested = True
+            self._shutdown_task = self.hass.async_create_task(
+                self._async_shutdown(), "soundbar_shutdown"
+            )
+        _, cancelled = await async_complete(self._shutdown_task)
+        if cancelled:
+            raise asyncio.CancelledError
 
-            async def drain():
+    async def _async_handle_stop(self, _event: Event) -> None:
+        await self.async_shutdown()
+
+    async def _async_shutdown(self):
+        await super().async_shutdown()
+        if self._unsub_stop is not None:
+            self._unsub_stop()
+            self._unsub_stop = None
+        try:
+            if self._ocf_task is not None and not self._ocf_task.done():
+                self._ocf_task.cancel()
                 try:
                     await self._ocf_task
                 except asyncio.CancelledError:
                     pass
-
-            _, cancelled = await async_complete(drain())
-            if cancelled:
-                raise asyncio.CancelledError
+        finally:
+            if self.ocf is not None:
+                await self.ocf.async_close()
 
     async def async_write(self, action, expected, *, cloud_only=False, read_fields=()):
         async with self._write_lock, self._poll_lock:

@@ -72,6 +72,7 @@ class TestOcfCoordinator(IsolatedAsyncioTestCase):
 
     def attach_ocf(self, coordinator):
         client = MagicMock()
+        client.async_close = AsyncMock()
         client.available = True
         client.diagnostics.return_value = {"configured": True, "available": True}
         self.payloads = {

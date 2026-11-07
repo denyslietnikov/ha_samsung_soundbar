@@ -1,4 +1,14 @@
 {
+    "entity": {
+        "switch": {
+            "moderate_bass": {
+                "name": "Moderater Bass"
+            },
+            "spacefit_sound": {
+                "name": "SpaceFit Sound"
+            }
+        }
+    },
     "issues": {
         "cloud_auth": {
             "title": "SmartThings-Autorisierung erforderlich",

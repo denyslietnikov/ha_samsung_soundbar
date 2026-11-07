@@ -84,6 +84,49 @@ async def test_existing_switch_ids_and_native_toggles_use_local_readback(
     assert registered(hass, entry) == ids
 
 
+@pytest.mark.parametrize(
+    ("language", "names"),
+    (
+        ("en", {"moderate_bass": "Moderate Bass", "spacefit_sound": "SpaceFit Sound"}),
+        ("de", {"moderate_bass": "Moderater Bass", "spacefit_sound": "SpaceFit Sound"}),
+    ),
+)
+async def test_new_switch_names_are_translated_without_changing_ids(
+    hass, entry, transports, audio, language, names
+):
+    hass.config.language = language
+    registry = er.async_get(hass)
+    saved = {}
+    for field in names:
+        profile = Q800F_AUDIO_SWITCHES[field]
+        unique = "existing-cloud-id_sw_" + profile.suffix
+        saved[field] = registry.async_get_or_create(
+            "switch",
+            DOMAIN,
+            unique,
+            suggested_object_id="saved_" + field,
+            config_entry=entry,
+        ).entity_id
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    for field, name in names.items():
+        entity_id = saved[field]
+        item = registry.async_get(entity_id)
+        assert item.translation_key == field
+        assert item.has_entity_name
+        assert hass.states.get(entity_id).attributes["friendly_name"] == (
+            "Soundbar Q800F " + name
+        )
+    before = registered(hass, entry)
+    registry.async_update_entity(saved["moderate_bass"], name="My bass setting")
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert registered(hass, entry) == before
+    assert hass.states.get(saved["moderate_bass"]).attributes["friendly_name"] == (
+        "My bass setting"
+    )
+
+
 async def test_external_app_change_and_spacefit_support_are_field_scoped(
     hass, entry, transports, audio
 ):
