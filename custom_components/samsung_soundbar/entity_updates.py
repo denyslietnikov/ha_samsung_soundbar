@@ -22,25 +22,34 @@ def register_device_update_listener(
     coordinator = device.coordinator
 
     def available_for(entity):
+        tone_field = getattr(entity, "_soundbar_tone_field", None)
+        if isinstance(tone_field, str):
+            return device.tone_control_available(tone_field)
         audio_field = getattr(entity, "_soundbar_audio_field", None)
         if isinstance(audio_field, str) and audio_field in Q800F_AUDIO_SWITCHES:
             return device.audio_switch_available(audio_field)
         if getattr(entity, "_soundbar_woofer_absolute", False) is True:
             return device.woofer_control_available
-        if getattr(entity, "_soundbar_woofer_relative", False) is True and device.ocf_woofer_profile is not None:
+        if (
+            getattr(entity, "_soundbar_woofer_relative", False) is True
+            and device.ocf_woofer_profile is not None
+        ):
             return False
         ocf_fields = getattr(entity, "_soundbar_ocf_fields", ())
         if isinstance(ocf_fields, (tuple, list)) and ocf_fields:
-            return coordinator is not None and all(
-                coordinator.ocf_field_available(key) for key in ocf_fields
-            ) and (
-                not getattr(entity, "_soundbar_requires_on", False)
-                or device.state in ("on", "playing", "paused")
+            return (
+                coordinator is not None
+                and all(coordinator.ocf_field_available(key) for key in ocf_fields)
+                and (
+                    not getattr(entity, "_soundbar_requires_on", False)
+                    or device.state in ("on", "playing", "paused")
+                )
             )
         if getattr(entity, "_soundbar_local_only", False):
             local_available = (
                 coordinator.state.snapshot().local_available
-                if coordinator is not None else device.local_available
+                if coordinator is not None
+                else device.local_available
             )
             return local_available and (
                 not getattr(entity, "_soundbar_requires_on", False)

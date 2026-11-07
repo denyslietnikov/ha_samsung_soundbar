@@ -29,6 +29,31 @@ Q800F_WOOFER = WooferProfile("HW-Q800F", "22_AV_HW-Q800F")
 
 
 @dataclass(frozen=True)
+class ToneProfile:
+    field: str
+    property: str
+    minimum: int = -6
+    maximum: int = 6
+    step: int = 1
+    href: str = "/sec/networkaudio/tone"
+
+
+def validate_tone_level(value):
+    """Accept exact integral levels only; no truncation or clamping."""
+    if type(value) not in (int, float) or not -6 <= value <= 6 or int(value) != value:
+        raise ValueError("Tone level must be an integer between -6 and 6")
+    return int(value)
+
+
+# 2026-11-07, Q800F/1103.1: each field -6/-1/+1/+6 read back in Surround;
+# the other tone field, advanced audio and EQ were unchanged. Not other models/modes.
+Q800F_TONE = {
+    "bass_level": ToneProfile("bass_level", "x.com.samsung.networkaudio.bass"),
+    "treble_level": ToneProfile("treble_level", "x.com.samsung.networkaudio.treble"),
+}
+
+
+@dataclass(frozen=True)
 class AudioSwitchProfile:
     field: str
     href: str

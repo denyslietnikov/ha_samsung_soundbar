@@ -77,6 +77,38 @@ class TestLocalOcf(IsolatedAsyncioTestCase):
                 await self.client.async_read(href)
         self.protocol.discover.assert_not_called()
 
+    async def test_tone_grant_accepts_only_canonical_single_integer_property(self):
+        from custom_components.samsung_soundbar.ocf_profiles import (
+            Q800F_TONE,
+            ToneProfile,
+        )
+
+        profile = Q800F_TONE["bass_level"]
+        href, field = profile.href, profile.property
+        self.session.get.side_effect = lambda path, **kwargs: (
+            69,
+            cbor2.dumps({"di": str(TARGET)} if path == ["oic", "d"] else {field: -6}),
+        )
+        result = await self.client.async_write(href, {field: -6}, tone_profile=profile)
+        self.assertTrue(result.readback_matches)
+        for payload in (
+            {field: True},
+            {field: 0.5},
+            {field: 7},
+            {field: -7},
+            {field: 0, "other": 1},
+        ):
+            with self.subTest(payload=payload), self.assertRaises(self.module.OcfError):
+                await self.client.async_write(href, payload, tone_profile=profile)
+        for grant in (None, ToneProfile(profile.field, profile.property)):
+            with self.assertRaises(self.module.OcfError):
+                await self.client.async_write(href, {field: 0}, tone_profile=grant)
+        with self.assertRaises(self.module.OcfError):
+            await self.client.async_write(
+                "/sec/networkaudio/eq", {field: 0}, tone_profile=profile
+            )
+        self.session.post.assert_called_once()
+
     async def test_mismatched_authenticated_identity_is_not_accepted(self):
         self.session.get.return_value = (69, cbor2.dumps({"di": str(CLIENT)}))
         self.session.get.side_effect = None

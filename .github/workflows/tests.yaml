@@ -60,3 +60,4 @@ jobs:
           tests/test_ocf_state.py
           tests/test_ocf_woofer.py
           tests/test_ocf_advanced_audio.py
+          tests/test_ocf_equalizer.py

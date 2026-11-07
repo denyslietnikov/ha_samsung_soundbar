@@ -15,7 +15,12 @@ from uuid import UUID
 import cbor2
 
 from .ocf_credentials import OcfCredential, async_complete
-from .ocf_profiles import Q800F_AUDIO_SWITCHES, Q800F_WOOFER, validate_woofer_level
+from .ocf_profiles import (
+    Q800F_AUDIO_SWITCHES,
+    Q800F_TONE,
+    Q800F_WOOFER,
+    validate_woofer_level,
+)
 
 _BASE = "/sec/networkaudio/"
 READ_HREFS = frozenset(
@@ -361,13 +366,35 @@ class LocalSoundbarOcfClient:
             return await self._run(partial(self._read, href))
 
     async def async_write(
-        self, href, payload, *, woofer_profile=None, switch_profile=None
+        self,
+        href,
+        payload,
+        *,
+        woofer_profile=None,
+        switch_profile=None,
+        tone_profile=None,
     ):
         # Wider writes need the model-scoped profile granted by the verified route.
         switch_write = any(
             switch_profile is item for item in Q800F_AUDIO_SWITCHES.values()
         )
-        if switch_write:
+        tone_write = tone_profile is not None
+        if tone_write:
+            valid = (
+                any(tone_profile is item for item in Q800F_TONE.values())
+                and switch_profile is None
+                and woofer_profile is None
+                and href == tone_profile.href
+                and isinstance(payload, dict)
+                and set(payload) == {tone_profile.property}
+                and type(payload[tone_profile.property]) is int
+                and tone_profile.minimum
+                <= payload[tone_profile.property]
+                <= tone_profile.maximum
+            )
+            if not valid:
+                raise OcfError("unverified")
+        elif switch_write:
             valid = (
                 href == switch_profile.href
                 and isinstance(payload, dict)
@@ -385,7 +412,7 @@ class LocalSoundbarOcfClient:
             or (woofer_profile is not Q800F_WOOFER and payload[_FIELD] not in (0, 1))
         ):
             raise OcfError("unverified")
-        if not switch_write:
+        if not switch_write and not tone_write:
             try:
                 validate_woofer_level(payload[_FIELD])
             except ValueError:

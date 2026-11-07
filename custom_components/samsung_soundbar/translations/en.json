@@ -1,5 +1,20 @@
 {
+    "exceptions": {
+        "ocf_tone_invalid": {
+            "message": "Bass and Treble levels must be integers between -6 and 6."
+        },
+        "ocf_tone_unavailable": {
+            "message": "Local tone control is unavailable. Check soundbar power and OCF readback."
+        },
+        "ocf_tone_unconfirmed": {
+            "message": "The local tone change was not confirmed. No retry or Cloud fallback was attempted."
+        }
+    },
     "entity": {
+        "number": {
+            "bass_level": {"name": "Bass"},
+            "treble_level": {"name": "Treble"}
+        },
         "switch": {
             "moderate_bass": {
                 "name": "Moderate Bass"

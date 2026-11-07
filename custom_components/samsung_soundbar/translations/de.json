@@ -1,5 +1,20 @@
 {
+    "exceptions": {
+        "ocf_tone_invalid": {
+            "message": "Bass und Höhen müssen ganzzahlige Werte zwischen -6 und 6 sein."
+        },
+        "ocf_tone_unavailable": {
+            "message": "Die lokale Klangregelung ist nicht verfügbar. Prüfen Sie den Betriebszustand und die OCF-Rückmeldung."
+        },
+        "ocf_tone_unconfirmed": {
+            "message": "Die lokale Klanganpassung wurde nicht bestätigt. Kein erneuter Versuch oder Cloud-Fallback wurde ausgeführt."
+        }
+    },
     "entity": {
+        "number": {
+            "bass_level": {"name": "Bass"},
+            "treble_level": {"name": "Höhen"}
+        },
         "switch": {
             "moderate_bass": {
                 "name": "Moderater Bass"

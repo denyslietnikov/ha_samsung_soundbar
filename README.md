@@ -141,7 +141,7 @@ recommended. Actual router/device address changes still need field-testing.
 Q800F research has confirmed authenticated local OCF access and Woofer
 read/write/readback. **OCF credential import and storage are available in the
 integration options. OCF audio-setting reads feed the shared coordinator, and
-Q800F has a verified local Woofer slider and six local audio switches. Other
+Q800F has verified local Woofer, Bass and Treble sliders and six local audio switches. Other
 OCF-backed controls are a later stage. Existing RPC core controls are unchanged.**
 The offline extractor below only validates or explicitly exports
 an existing credential from a selected local file. It makes no network requests
@@ -192,7 +192,7 @@ missing/null values do not refresh freshness, and readbacks expire after 120
 seconds. Hybrid may use fresh Cloud fallback for these fields only when the
 existing fallback option is enabled. A transport error is not a confirmed Off.
 
-Verified Q800F Woofer, Advanced Audio and SpaceFit profiles are enabled for local
+Verified Q800F Woofer, Bass/Treble, Advanced Audio and SpaceFit profiles are enabled for local
 writes. Other controls still require their own write probes. Unknown EQ/channel
 shapes and enums are omitted rather than guessed.
 
@@ -269,6 +269,28 @@ Owner-approved protocol probes toggled each of the six fields separately and
 restored every original value with GET confirmation. Neighboring audio fields
 were unchanged and original power was restored. Visual app-to-HA checks and
 operation in different sound modes still need a field test in the installed HA.
+
+### Local Bass and Treble
+
+With authenticated Q800F OCF readback, **Bass** and **Treble** appear as independent
+native sliders in Local-only and Hybrid. Each uses integer levels from -6 to +6
+with step 1, not percentages. No dB unit is inferred from the numeric payload.
+The new unique ID suffixes are `_num_bass_level` and `_num_treble_level`; existing
+Woofer and switch IDs are unchanged. No optional Cloud checkbox is required.
+
+Each action checks fresh target readback and RPC power under the shared command
+lock, sends one tone property, then requires matching readback. The other tone
+property is not sent. Missing, out-of-profile or unsupported fields do not create
+new controls. A proven route stays local until reload: outages make the control
+unavailable, without waking the soundbar, optimistic state or Cloud fallback.
+External changes use the existing shared OCF polling tier.
+
+Owner-approved Q800F/1103.1 probes confirmed -6, -1, +1 and +6 for each property in
+Surround mode. Every probe restored the original level, kept the other tone field,
+EQ and Advanced Audio unchanged, and restored original power. This is a bounded
+sample, not proof of every integer or every sound-mode combination. EQ presets,
+EQ bands, channel levels and Audio Sync writes remain separate future work.
+Installed-HA and visual SmartThings app checks remain pending.
 
 ### Already Copied the Hashed Q800F Store?
 

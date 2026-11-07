@@ -337,6 +337,7 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         *,
         woofer_profile=None,
         switch_profile=None,
+        tone_profile=None,
         guard=None,
         required_fields=(),
     ):
@@ -354,7 +355,11 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
                     self.state.begin_write(
                         project_ocf(href, payload).values, source="ocf"
                     )
-                if switch_profile is not None:
+                if tone_profile is not None:
+                    result = await self.ocf.async_write(
+                        href, payload, tone_profile=tone_profile
+                    )
+                elif switch_profile is not None:
                     result = await self.ocf.async_write(
                         href, payload, switch_profile=switch_profile
                     )

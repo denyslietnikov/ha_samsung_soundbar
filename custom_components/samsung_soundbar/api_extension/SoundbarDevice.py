@@ -12,6 +12,7 @@ from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
+    ServiceValidationError,
 )
 from pysmartthings import DeviceEvent
 from pysmartthings.exceptions import (
@@ -44,9 +45,11 @@ from ..local_rpc import (
 from ..ocf_profiles import (
     LEGACY_AUDIO_SWITCH_FIELDS,
     Q800F_AUDIO_SWITCHES,
+    Q800F_TONE,
     Q800F_WOOFER,
     WOOFER_FIELD,
     WOOFER_HREF,
+    validate_tone_level,
     validate_woofer_level,
 )
 from ..ocf_state import OCF_FIELDS
@@ -210,6 +213,7 @@ class SoundbarDevice:
         self.coordinator = None
         self.__ocf_woofer_profile = None
         self.__ocf_audio_profiles = {}
+        self.__ocf_tone_profiles = {}
         self.cloud_setup_pending = False
         self._device_id = self.device.device_id
         self.__auth_provider = auth_provider
@@ -1664,6 +1668,102 @@ class SoundbarDevice:
         return self.ocf_audio_profile(field) is not None or (
             field in LEGACY_AUDIO_SWITCH_FIELDS and self.can_control_advanced_audio
         )
+
+    def ocf_tone_profile(self, field):
+        profile = Q800F_TONE.get(field)
+        coordinator = self.coordinator
+        if (
+            profile is None
+            or coordinator is None
+            or not coordinator.state.use_ocf
+            or coordinator.ocf is None
+        ):
+            return None
+        if field in self.__ocf_tone_profiles:
+            return self.__ocf_tone_profiles[field]
+        record = coordinator.state.records["ocf"].get(field)
+        if (
+            coordinator.ocf.validated is not True
+            or not (
+                self.model == Q800F_WOOFER.model
+                or self.local_identifier == Q800F_WOOFER.rpc_identifier
+            )
+            or not coordinator.ocf_field_available(field)
+            or record is None
+            or type(record.value) is not int
+            or not profile.minimum <= record.value <= profile.maximum
+            or record.observed_at
+            < coordinator.state.written_at.get(field, float("-inf"))
+        ):
+            return None
+        self.__ocf_tone_profiles[field] = profile
+        return profile
+
+    def tone_level(self, field):
+        profile = self.ocf_tone_profile(field)
+        if profile is None:
+            return None
+        record = self.coordinator.state.records["ocf"].get(field)
+        if (
+            record is None
+            or not record.fresh(self.coordinator.state.clock())
+            or type(record.value) is not int
+            or not profile.minimum <= record.value <= profile.maximum
+        ):
+            return None
+        return record.value
+
+    def tone_control_available(self, field):
+        if self.ocf_tone_profile(field) is None:
+            return False
+        coordinator = self.coordinator
+        power = coordinator.state.resolve("power")
+        return bool(
+            coordinator.ocf_field_available(field)
+            and self.tone_level(field) is not None
+            and coordinator.state.snapshot().local_available
+            and power is not None
+            and power.source == "rpc"
+            and power.value == "on"
+        )
+
+    def require_tone_available(self, field):
+        if not self.tone_control_available(field):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="ocf_tone_unavailable"
+            )
+
+    async def set_tone_level(self, field, value):
+        try:
+            if field not in Q800F_TONE:
+                raise ValueError
+            value = validate_tone_level(value)
+        except ValueError:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="ocf_tone_invalid"
+            ) from None
+        self.require_tone_available(field)
+        profile = self.ocf_tone_profile(field)
+        try:
+            result = await self.coordinator.async_write_ocf(
+                profile.href,
+                {profile.property: value},
+                tone_profile=profile,
+                guard=lambda: self.require_tone_available(field),
+                required_fields=(field,),
+            )
+        except OcfError:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="ocf_tone_unconfirmed"
+            ) from None
+        if (
+            result.readback_matches is not True
+            or not self.tone_control_available(field)
+            or self.tone_level(field) != value
+        ):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="ocf_tone_unconfirmed"
+            )
 
     def audio_switch_available(self, field):
         if self.ocf_audio_profile(field) is not None:
@@ -3189,6 +3289,10 @@ class SoundbarDevice:
                 "supported_presets": self.supported_equalizer_presets,
                 "action": self.equalizer_action,
                 "bands": self.equalizer_bands,
+            },
+            "tone": {
+                "bass_level": self.tone_level("bass_level"),
+                "treble_level": self.tone_level("treble_level"),
             },
             "media": {
                 "media_title": self.media_title,
