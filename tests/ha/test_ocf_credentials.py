@@ -45,6 +45,228 @@ def bundle(key=PSK):
     )
 
 
+async def import_test_bundle(hass, entry, content=None):
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    form = await hass.config_entries.options.async_configure(
+        form["flow_id"], {"ocf_action": "import"}
+    )
+    return await hass.config_entries.options.async_configure(
+        form["flow_id"], {"credential_bundle": content or bundle()}
+    )
+
+
+@pytest.mark.parametrize("mode", ("local_only", "hybrid_local_smartthings"))
+@pytest.mark.parametrize("binding", ("missing", "empty"))
+async def test_first_import_establishes_missing_legacy_identity_only_after_auth(
+    hass, entry, transports, store, mode, binding
+):
+    expected = dict(entry.options["local_identity"])
+    options = dict(entry.options)
+    options.pop("local_identity")
+    if binding == "empty":
+        options["local_identity"] = {}
+    options["control_mode"] = mode
+    hass.config_entries.async_update_entry(entry, options=options)
+    client = MagicMock()
+
+    async def validate(credential):
+        assert not entry.options.get("local_identity")
+        assert "ocf_configured" not in entry.data
+        assert await store.async_load() is None
+
+    client.async_validate_candidate = AsyncMock(side_effect=validate)
+    client.async_close = AsyncMock()
+    entry_id, unique_id = entry.entry_id, entry.unique_id
+    with patch(
+        "custom_components.samsung_soundbar.config_flow.LocalSoundbarOcfClient",
+        return_value=client,
+    ):
+        result = await import_test_bundle(hass, entry)
+    assert result["type"] == "create_entry"
+    assert entry.options["local_identity"] == expected
+    assert entry.options["control_mode"] == mode
+    assert entry.data["ocf_configured"] is True
+    assert (entry.entry_id, entry.unique_id) == (entry_id, unique_id)
+    assert (await store.async_load()).psk == PSK
+    client.async_validate_candidate.assert_awaited_once()
+    client.async_close.assert_awaited_once()
+    transports.auth.assert_not_awaited()
+
+
+async def test_import_missing_identity_auth_failure_never_creates_binding(
+    hass, entry, transports, store
+):
+    from custom_components.samsung_soundbar.local_ocf import OcfError
+
+    options = dict(entry.options)
+    options.pop("local_identity")
+    hass.config_entries.async_update_entry(entry, options=options)
+    client = MagicMock()
+    client.async_validate_candidate = AsyncMock(side_effect=OcfError("auth"))
+    client.async_close = AsyncMock()
+    with patch(
+        "custom_components.samsung_soundbar.config_flow.LocalSoundbarOcfClient",
+        return_value=client,
+    ):
+        result = await import_test_bundle(hass, entry)
+    assert result["errors"]["base"] == "ocf_auth"
+    assert "local_identity" not in entry.options
+    assert "ocf_configured" not in entry.data
+    assert await store.async_load() is None
+
+
+async def test_import_unreachable_identity_is_not_reported_as_wrong_device(
+    hass, entry, transports, store
+):
+    from custom_components.samsung_soundbar.local_identity import LocalIdentityError
+
+    with (
+        patch(
+            "custom_components.samsung_soundbar.config_flow.async_read_local_identity",
+            new=AsyncMock(side_effect=LocalIdentityError("offline")),
+        ),
+        patch(
+            "custom_components.samsung_soundbar.config_flow.LocalSoundbarOcfClient"
+        ) as client,
+    ):
+        result = await import_test_bundle(hass, entry)
+    assert result["errors"]["base"] == "identity_unavailable"
+    client.assert_not_called()
+    assert await store.async_load() is None
+
+
+async def test_import_cannot_replace_existing_identity(hass, entry, transports, store):
+    expected = dict(entry.options["local_identity"])
+    with (
+        patch(
+            "custom_components.samsung_soundbar.config_flow.async_read_local_identity",
+            new=AsyncMock(return_value={"wifi_mac": "02:00:00:00:00:99"}),
+        ),
+        patch(
+            "custom_components.samsung_soundbar.config_flow.LocalSoundbarOcfClient"
+        ) as client,
+    ):
+        result = await import_test_bundle(hass, entry)
+    assert result["errors"]["base"] == "identity_mismatch"
+    assert entry.options["local_identity"] == expected
+    client.assert_not_called()
+    assert await store.async_load() is None
+
+
+async def test_missing_identity_import_rejects_empty_observed_identity(
+    hass, entry, transports, store
+):
+    options = dict(entry.options)
+    options.pop("local_identity")
+    hass.config_entries.async_update_entry(entry, options=options)
+    with (
+        patch(
+            "custom_components.samsung_soundbar.config_flow.async_read_local_identity",
+            new=AsyncMock(return_value={}),
+        ),
+        patch(
+            "custom_components.samsung_soundbar.config_flow.LocalSoundbarOcfClient"
+        ) as client,
+    ):
+        result = await import_test_bundle(hass, entry)
+    assert result["errors"]["base"] == "identity_unavailable"
+    client.assert_not_called()
+    assert "local_identity" not in entry.options
+    assert await store.async_load() is None
+
+
+async def test_missing_identity_import_storage_failure_never_creates_binding(
+    hass, entry, transports, store
+):
+    from custom_components.samsung_soundbar.ocf_credentials import (
+        OcfCredentialError,
+        OcfCredentialStore,
+    )
+
+    options = dict(entry.options)
+    options.pop("local_identity")
+    hass.config_entries.async_update_entry(entry, options=options)
+    client = MagicMock()
+    client.async_validate_candidate = AsyncMock()
+    client.async_close = AsyncMock()
+    with (
+        patch(
+            "custom_components.samsung_soundbar.config_flow.LocalSoundbarOcfClient",
+            return_value=client,
+        ),
+        patch.object(
+            OcfCredentialStore,
+            "async_save",
+            new=AsyncMock(side_effect=OcfCredentialError),
+        ),
+    ):
+        result = await import_test_bundle(hass, entry)
+    assert result["errors"]["base"] == "ocf_storage"
+    assert "local_identity" not in entry.options
+    assert "ocf_configured" not in entry.data
+    assert await store.async_load() is None
+
+
+async def test_missing_identity_import_rejects_concurrent_binding_change(
+    hass, entry, transports, store
+):
+    options = dict(entry.options)
+    options.pop("local_identity")
+    hass.config_entries.async_update_entry(entry, options=options)
+    changed = {"wifi_mac": "02:00:00:00:00:99"}
+    client = MagicMock()
+
+    async def validate(credential):
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, "local_identity": changed}
+        )
+
+    client.async_validate_candidate = AsyncMock(side_effect=validate)
+    client.async_close = AsyncMock()
+    with patch(
+        "custom_components.samsung_soundbar.config_flow.LocalSoundbarOcfClient",
+        return_value=client,
+    ):
+        result = await import_test_bundle(hass, entry)
+    assert result["errors"]["base"] == "ocf_storage"
+    assert entry.options["local_identity"] == changed
+    assert "ocf_configured" not in entry.data
+    assert await store.async_load() is None
+
+
+async def test_loaded_legacy_entry_keeps_entity_ids_after_first_identity_import(
+    hass, entry, transports, store
+):
+    from .test_lifecycle import registered
+
+    expected = dict(entry.options["local_identity"])
+    options = dict(entry.options)
+    options.pop("local_identity")
+    hass.config_entries.async_update_entry(entry, options=options)
+    transports.rpc.power_on = AsyncMock()
+    transports.rpc.power_off = AsyncMock()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    before = registered(hass, entry)
+    client = MagicMock()
+    client.async_validate_candidate = AsyncMock()
+    client.async_close = AsyncMock()
+    with patch(
+        "custom_components.samsung_soundbar.config_flow.LocalSoundbarOcfClient",
+        return_value=client,
+    ):
+        result = await import_test_bundle(hass, entry)
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert entry.options["local_identity"] == expected
+    assert registered(hass, entry) == before
+    assert entry.runtime_data.ocf is not None
+    assert (await store.async_load()).psk == PSK
+    transports.rpc.power_on.assert_not_awaited()
+    transports.rpc.power_off.assert_not_awaited()
+    transports.auth.assert_not_awaited()
+
+
 @pytest.fixture
 def store(hass, entry, tmp_path):
     from custom_components.samsung_soundbar.ocf_credentials import OcfCredentialStore

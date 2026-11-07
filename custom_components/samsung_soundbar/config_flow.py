@@ -604,10 +604,14 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                 or not host
             ):
                 return None, "ocf_local_required"
-            if not saved:
+            if saved is not None and not isinstance(saved, dict):
                 return None, "identity_unavailable"
+            saved = dict(saved) if saved else None
 
             def active():
+                current_identity = self.config_entry.options.get(
+                    CONF_LOCAL_IDENTITY
+                ) or self.config_entry.data.get(CONF_LOCAL_IDENTITY)
                 return (
                     self.hass.config_entries.async_get_entry(self.config_entry.entry_id)
                     is self.config_entry
@@ -621,6 +625,14 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                     == host
                     and get_entry_option(self.config_entry, CONF_CONTROL_MODE)
                     == options[CONF_CONTROL_MODE]
+                    and (
+                        current_identity == saved
+                        or (
+                            isinstance(current_identity, dict)
+                            and not current_identity
+                            and saved is None
+                        )
+                    )
                 )
 
             client, owned = None, False
@@ -628,8 +640,10 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                 if not active():
                     raise OcfCredentialError
                 observed = await self._async_read_identity(options)
-                if not identities_match(saved, observed):
-                    raise LocalIdentityError("Local identity mismatch")
+                if not observed:
+                    return None, "identity_unavailable"
+                if saved is not None and not identities_match(saved, observed):
+                    return None, "identity_mismatch"
                 previous = await store.async_load()
                 if (
                     previous is not None
@@ -647,9 +661,11 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
                     if owned:
                         await client.async_close()
                 await store.async_save(credential, expected=previous, guard=active)
-                return self._async_finish_ocf(True), None
+                return self._async_finish_ocf(
+                    True, identity=observed if saved is None else None
+                ), None
             except LocalIdentityError:
-                return None, "identity_mismatch"
+                return None, "identity_unavailable"
             except OcfCredentialError:
                 return None, "ocf_storage"
             except OcfError as error:
@@ -678,19 +694,22 @@ class SamsungSoundbarOptionsFlowHandler(OptionsFlow):
             data_schema=vol.Schema({vol.Required("confirm", default=False): bool}),
         )
 
-    def _async_finish_ocf(self, configured):
+    def _async_finish_ocf(self, configured, *, identity=None):
         data = dict(self.config_entry.data)
+        options = dict(self.config_entry.options)
+        if identity is not None:
+            options[CONF_LOCAL_IDENTITY] = dict(identity)
         if configured:
             data[CONF_OCF_CONFIGURED] = True
         else:
             data.pop(CONF_OCF_CONFIGURED, None)
         changed = self.hass.config_entries.async_update_entry(
-            self.config_entry, data=data
+            self.config_entry, data=data, options=options
         )
         update_ocf_issue(self.hass, self.config_entry, None)
         if not changed and getattr(self.config_entry, "runtime_data", None) is not None:
             self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
-        return self.async_create_entry(title="", data=dict(self.config_entry.options))
+        return self.async_create_entry(title="", data=options)
 
     async def _async_save_options(self, options: dict[str, Any]) -> ConfigFlowResult:
         cloud_keys = {

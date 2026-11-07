@@ -155,13 +155,18 @@ Do not delete your existing integration or remove the soundbar from SmartThings.
 1. Install the updated integration and restart HA. HA installs the pinned
    `smartthings-local` dependency automatically; do not install the tool venv in HA.
 2. In the existing soundbar entry, save **Local only** or **Hybrid** with the
-   working host first. Older Hybrid entries should save Options once to record
-   the physical device identity. Do not remove/re-add the soundbar.
+   working host first. Do not remove/re-add the soundbar.
 3. Reopen Options, select **Import or replace credential** under **Local OCF
    credential**, then submit. This action does not save other changes in that form.
 4. Paste the full contents of `q800f.ocf-credential.json` into the masked field,
    locally in HA, and submit. Never paste the credential into chat or an issue.
    Identity and DTLS authentication are checked without changing soundbar settings.
+
+Older entries without a saved physical identity can import directly: HA reads the
+configured host's stable identity and checks the credential against the protected
+OCF device UUID before saving either the first binding or the credential. An
+existing identity mismatch is still rejected, never silently replaced. Read errors
+on ports 8001/9110 are reported separately from a different-device mismatch.
 
 The PSK and both UUIDs are stored in a private, atomic HA Store under
 `.storage/samsung_soundbar.ocf.<entry_id>` with file permissions `0600`, not in
