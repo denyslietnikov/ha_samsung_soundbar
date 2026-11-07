@@ -1,341 +1,156 @@
 # Samsung Soundbar for Home Assistant
 
-Home Assistant custom integration for Samsung soundbars. It combines the
-public SmartThings API with confirmed local JSON-RPC control where the
-soundbar supports it.
-
-The project is developed independently and currently focuses on reliable
-operation with recent Home Assistant releases and Samsung HW-Q800F.
-
-## Highlights
-
-- SmartThings OAuth setup with access-token refresh and reauthentication.
-- Media player control for power, volume, mute, playback, source and sound
-  mode when the device exposes the required capability.
-- Hybrid LAN control for confirmed Q800F media controls.
-- Optional soundbar entities for advanced audio, EQ and woofer control where
-  the device profile supports them.
-- Diagnostics for SmartThings status, execute payloads and local JSON-RPC.
+Local Home Assistant integration focused on Samsung HW-Q800F. Both modes use
+LAN JSON-RPC for power, volume, mute, input and sound mode. Hybrid adds
+authenticated local OCF audio controls when a matching credential and validated
+readback are available. No account sign-in or remote API is used by the integration.
 
 ## Requirements
 
-- Home Assistant `2026.9.4` or newer.
-- Integration version `0.7.0b63` uses `pysmartthings 4.0.3`.
-- SmartThings OAuth-In application for SmartThings Cloud or Hybrid mode.
-- For Hybrid or Local-only mode: the soundbar reachable on the local network
-  with IP Control enabled.
+- Home Assistant 2026.9.4 or newer.
+- Soundbar reachable from Home Assistant with IP Control enabled.
+- Local JSON-RPC HTTPS port 1516; stable physical identity metadata on port
+  8001 or 9110 is required when binding a host.
+- For OCF audio settings: a previously saved credential for that soundbar and
+  access to its local DTLS endpoint.
+
+The local OCF dependencies are
+`smartthings-local==0.1.24` and `cbor2>=6.2.0.post2`.
 
 ## Control Modes
 
-| Mode | Status | Account and OAuth | Primary state and controls | Q800F notes |
-| --- | --- | --- | --- | --- |
-| SmartThings Cloud | Available | Required | Public SmartThings capabilities | Source and sound-mode write support depends on the device profile. |
-| Hybrid Local + SmartThings Cloud | Available | Required | Local JSON-RPC for media controls; SmartThings for setup, fallback and cloud-only features | Recommended for Q800F. |
-| Local only | Available | Not required | Local JSON-RPC only | Select during initial setup or in Options; no SmartThings requests during setup, reload or operation in this mode. |
+| Mode | Stored value | Behavior |
+| --- | --- | --- |
+| Local only (RPC) | `local_only` | RPC only. A saved OCF credential is retained but is not used. |
+| Hybrid Local + OCF | `hybrid_local_ocf` | RPC plus authenticated OCF audio readback and profile-validated controls. |
 
-An existing entry can switch to **Local only** in Options after configuring a
-working local host. Its existing device and entity IDs are retained. New
-Local-only entries skip OAuth. Switching an existing entry to Local-only
-requires local identity confirmation and removes its stored OAuth credentials;
-returning to a cloud mode requires authorization again. Do not delete the entry
-to switch modes. Without an imported OCF credential, Cloud-only advanced settings
-are not available in Local-only mode. Verified Q800F OCF controls work locally.
+**Hybrid without a credential is RPC operation with a warning, not working OCF.**
+Import your saved credential through Options to enable OCF. Missing, invalid or
+offline OCF access does not block RPC startup. OCF controls are discovered only
+after their model-scoped profile and typed local readback have been validated;
+an unavailable setting is never presented as a confirmed Off.
 
-## Installation
+## Installation and Setup
 
-### HACS
+1. Add `https://github.com/denyslietnikov/ha_samsung_soundbar` to HACS as an
+   Integration repository, install Samsung Soundbar, and restart Home Assistant.
+   For manual installation, place `custom_components/samsung_soundbar` at the
+   matching path in your Home Assistant configuration directory.
+2. Add Samsung Soundbar in **Settings -> Devices & services**.
+3. Select **Local only (RPC)** or **Hybrid Local + OCF** and configure the local
+   host, RPC port, timeout and certificate verification. Samsung's local
+   certificate normally requires verification to be disabled.
+4. Home Assistant verifies RPC and the physical identity before saving the host.
+   `getIdentifier` is model information, not a unique device identity.
 
-1. In HACS, open **Integrations** and add a custom repository.
-2. Use `https://github.com/denyslietnikov/ha_samsung_soundbar` with category
-   **Integration**.
-3. Install **Samsung Soundbar** and restart Home Assistant.
-4. Add **Samsung Soundbar** from **Settings -> Devices & services**.
+The local RPC access token is created at runtime. Do not copy it into configuration
+or submit it in a support request.
 
-### Manual installation
+## Existing Entries
 
-Copy `custom_components/samsung_soundbar` to the same path in your Home
-Assistant configuration directory, restart Home Assistant, then add the
-integration from the UI.
+Back up Home Assistant before updating. Keep the existing entry. Migration retains its device ID, entity unique IDs,
+entity IDs, custom names and history, and preserves its separate OCF credential
+Store. No replacement entry is created. Obsolete authorization and fallback
+settings are removed; a saved OCF credential is retained even in RPC-only mode.
 
-## SmartThings Cloud Setup
+A legacy entry without a usable local host or confirmed physical identity needs local reconfiguration. Follow
+the **Local soundbar configuration required** Repair or open the existing entry's
+Reconfigure/Options. The integration does not guess an address or delete the entry.
+A host change is checked against saved physical identity; mismatches are rejected.
 
-Create a SmartThings OAuth-In application and register the resulting Client ID
-and Client Secret in Home Assistant Application Credentials when prompted.
-
-Configure this exact redirect URI in the SmartThings application:
-
-```text
-https://my.home-assistant.io/redirect/oauth
-```
-
-Request these scopes:
-
-- `r:devices:*`
-- `x:devices:*`
-- `r:locations:*`
-
-Do not request `sse`. SmartThings does not grant that privileged scope to
-user-created OAuth-In applications, so this integration uses polling.
-
-After credentials are configured, add the integration, complete Samsung sign
-in, and select the soundbar.
-
-## Q800F Hybrid Setup
-
-Hybrid mode uses SmartThings OAuth for device discovery and optional cloud
-features, while the following media controls use local JSON-RPC over LAN:
-
-- power
-- volume and mute
-- input source
-- sound mode
-- codec and streaming-source readback
-
-Absolute Woofer control requires the verified OCF route described below.
-The former **Woofer +** and **Woofer -** buttons have been removed; RPC-only
-setups do not infer an absolute subwoofer level from relative commands.
-Volume and mute prefer `volumeControl` / `muteControl`, with legacy fallbacks
-when the device reports that a method is unsupported. Power commands require
-matching local readback rather than only a success acknowledgment.
-
-After adding the integration, open its options and select **Hybrid Local +
-SmartThings Cloud**. Configure:
-
-- local soundbar host/IP;
-- local RPC port: `1516`;
-- local SSL verification: normally off for Samsung's local certificate;
-- local RPC timeout;
-- optional SmartThings Cloud fallback.
-
-The local AccessToken is created by the soundbar at runtime. It is not the
-SmartThings OAuth token and is not stored in the Home Assistant configuration.
-
-For Q800F, Hybrid mode is the recommended currently available mode. It gives
-reliable local readback for `Input Preset`, `Sound Mode`, volume, mute and
-streaming source labels such as AirPlay, Google Cast and Roon.
+The obsolete EQ Preset select and former Woofer +/- buttons are removed only
+from the owning entry's exact registry rows. Other entities and custom names
+are not changed. Dashboards and automations using removed controls must be
+updated manually; use the Woofer number instead of the relative buttons.
 
 ### DHCP Address Recovery
 
-Local-only and Hybrid entries can recover a changed IPv4 address when Home
-Assistant DHCP discovery sees the soundbar. Discovery matches the confirmed
-Q800F MAC prefix `94:E6:BA` or hostnames starting with `tizen` or `soundbar`.
-Only events matching an entry's saved `wifiMac` trigger a read-only identity
-check on ports `8001`/`9110`; unrelated devices are not probed.
+For a saved Wi-Fi MAC, matching Home Assistant DHCP discovery can verify a new
+address against stable identity metadata on ports 8001/9110 and update the existing
+entry. Contradictory identities are rejected; incomplete metadata does not erase
+known identifiers. Discovery never creates or merges entries. Unmatched devices
+are not probed. A DHCP reservation remains recommended; real address changes
+still need field-testing.
 
-The new address is accepted only if a saved MAC/UUID matches the metadata and
-no shared identifier contradicts it. The existing entry reloads with the new
-host, retaining its device/entity IDs, history, OAuth credentials and other
-options. Partial metadata does not erase previously saved identifiers. DHCP
-discovery never creates an entry or merges devices through MAC connections.
+## Controls and Readback
 
-For older Hybrid entries, save Options once with the working local host to
-record its identity. If metadata is unavailable, Hybrid can keep working but
-automatic recovery needs a saved MAC. UUID-only entries, other MAC prefixes
-with unmatched hostnames, and networks where HA cannot observe DHCP discovery
-still need a manual host change in Options. Failed identity checks leave the
-old address unchanged; a later DHCP event can retry. A DHCP reservation remains
-recommended. Actual router/device address changes still need field-testing.
+| Control | Local only (RPC) | Hybrid Local + OCF |
+| --- | --- | --- |
+| Power, volume, mute | RPC with local readback | Same RPC route |
+| Source: Input, Sound: Mode | RPC capability-dependent | Same RPC route |
+| Volume and Sound From sensors | Local values when available | Same local values |
+| Tone: Woofer | Not exposed | Validated Q800F OCF profile, -12 to +6 dB, step 1 |
+| Tone: Bass / Treble | Not exposed | Independently validated OCF profiles, -6 to +6, step 1 |
+| Sound: Night Mode, Bass Boost, Voice Amplifier, Virtual, Moderate Bass, SpaceFit Sound | Not exposed | Discovered independently after validated OCF readback |
+| EQ Preset / seven-band EQ UI | Not exposed | Not exposed; backend diagnostics only |
 
-## Optional OCF Credential Recovery
+Advanced audio controls are discovered at startup or later when local profiles
+become available. Their existing IDs are reused. Once discovered, an outage makes
+them unavailable instead of removing/recreating them. A missing field does not
+disable its neighbors. Names use the native translated Sound/Source/Tone groups;
+user-customized names take precedence.
 
-Q800F research has confirmed authenticated local OCF access and Woofer
-read/write/readback. **OCF credential import and storage are available in the
-integration options. OCF audio-setting reads feed the shared coordinator, and
-Q800F has verified local Woofer, Bass and Treble sliders and six local audio
-switches. Local EQ presets remain diagnostic-only. Other
-OCF-backed controls are a later stage. Existing RPC core controls are unchanged.**
-The offline extractor below only validates or explicitly exports
-an existing credential from a selected local file. It makes no network requests
-and cannot prove that the credential still authenticates. The optional Q800F
-launcher adds read-only LAN authentication. Neither tool pairs/resets the soundbar.
-Do not delete your existing integration or remove the soundbar from SmartThings.
+OCF writes run through guarded device methods: check fresh RPC power and target
+readback inside the shared command queue, send one typed property, then require
+matching readback. They do not turn on the soundbar, silently change Sound Mode
+or replay ambiguous writes through another transport. Delayed acknowledgments
+allow bounded read-only convergence checks, not repeated writes.
+Voice Amplifier is Voice Enhancement, not Active Voice Amplifier.
 
-### Import the Saved Credential into Home Assistant
+Q800F/1103.1 protocol probes previously confirmed Woofer samples -12/-7/-6/+6,
+Bass and Treble samples -6/-1/+1/+6 in Surround, and individual audio-switch
+write/readback. Those are bounded protocol results, not proof of every mode,
+firmware or installed-HA UI behavior. Field verification remains necessary.
 
-1. Install the updated integration and restart HA. HA installs the pinned
-   `smartthings-local` dependency automatically; do not install the tool venv in HA.
-2. In the existing soundbar entry, save **Local only** or **Hybrid** with the
-   working host first. Do not remove/re-add the soundbar.
-3. Reopen Options, select **Import or replace credential** under **Local OCF
-   credential**, then submit. This action does not save other changes in that form.
-4. Paste the full contents of `q800f.ocf-credential.json` into the masked field,
-   locally in HA, and submit. Never paste the credential into chat or an issue.
-   Identity and DTLS authentication are checked without changing soundbar settings.
+Playback play/pause/stop/next/previous, individual speaker channel levels, rear
+speaker mode and Active Voice Amplifier controls are removed. Their integration
+actions are no longer registered. Media title, artist, duration, position and
+artwork remain unknown (`None`); no placeholder artwork or invented metadata
+is published. Available local model/manufacturer/firmware metadata is used
+without overwriting existing registry metadata with unknown values.
 
-Older entries without a saved physical identity can import directly: HA reads the
-configured host's stable identity and checks the credential against the protected
-OCF device UUID before saving either the first binding or the credential. An
-existing identity mismatch is still rejected, never silently replaced. Read errors
-on ports 8001/9110 are reported separately from a different-device mismatch.
+The retained actions are `select_soundmode`, `set_woofer_level`,
+`set_night_mode`, `set_bass_enhancer`, `set_voice_enhancer` and
+`set_space_fit_sound`, targeting the media player. They use the same guarded
+device methods as native controls. Unsupported local actions fail rather than
+being sent elsewhere.
 
-The PSK and both UUIDs are stored in a private, atomic HA Store under
-`.storage/samsung_soundbar.ocf.<entry_id>` with file permissions `0600`, not in
-config-entry data, Options, entity state or diagnostic output. This is **not
-encryption**: anyone with filesystem/root access to HA can read it. Keep your
-independent encrypted backup and HA backup emergency kit.
+### EQ Diagnostics
 
-Replacement is serialized with other imports and removal. A private `.rollback`
-Store temporarily retains the previous credential until a disk-verified commit;
-failed or cancelled writes restore it, and an interrupted transaction is recovered
-on the next load. The recovery record is removed after a verified commit/recovery.
-No plaintext credential export service is provided.
+Local EQ metadata does not create a select. The guarded backend retains reported
+`NONE`, `POP`, `JAZZ`, `CLASSIC`, `CUSTOM` presets for diagnostics only.
+Preset protocol write/readback was observed, but useful app/DSP behavior remains
+unconfirmed. Diagnostic prerequisites include fresh RPC power and Standard sound
+mode, Bass Boost off, matching OCF context and supported options. No prerequisite
+is changed implicitly. EQ band writes/sliders remain disabled: an ACK without a
+changed curve is not evidence of working band control.
 
-Credentials survive reload, restart, Cloud reauth and mode changes. Pure Cloud
-mode retains but does not use them. Optional OCF polling starts in the background,
-so an offline soundbar or invalid credential does not block RPC setup or its fast
-polling tier. Local OCF
-Repairs offer import, not Samsung OAuth reauthentication. If a Store is damaged,
-back up your credential, use **Forget local credential**, then import again.
-Forget requires confirmation and removes only this entry's HA copy; it does not
-reset/revoke the soundbar's key. Deleting the integration entry removes its Store.
+## Local OCF Credentials
 
-### OCF Readback and Diagnostics
+Choose **Import or replace credential** in the existing entry's Options, then
+paste your complete `q800f.ocf-credential.json` backup into the masked local
+field. Import verifies device identity and DTLS authentication before saving.
+Selecting import/forget does not save unrelated edits in that form. A successful import selects **Hybrid Local + OCF** for this entry. Audio
+controls still require matching profiles and fresh readback; saving a credential
+alone does not prove that every audio setting works.
 
-After a validated import, the existing coordinator runs one bounded audio-resource
-sweep per entry, with 30 seconds between completed sweeps. RPC still owns power,
-volume, mute, input and sound mode. OCF owns its known audio-setting readbacks;
-missing/null values do not refresh freshness, and readbacks expire after 120
-seconds. Hybrid may use fresh Cloud fallback for these fields only when the
-existing fallback option is enabled. A transport error is not a confirmed Off.
+The PSK and client/device UUIDs are stored separately in
+`.storage/samsung_soundbar.ocf.<entry_id>` using atomic HA storage and private
+`0600` file permissions, never in entry options, entity state or diagnostics.
+This is **not encryption**. Keep an independent encrypted backup and the HA
+backup emergency kit. A temporary private rollback Store protects replacement;
+an interrupted transaction is recovered on the next load.
 
-Verified Q800F Woofer, Bass/Treble, EQ presets, Advanced Audio and SpaceFit profiles are enabled for local
-writes. Other controls still require their own write probes. Unknown EQ/channel
-shapes and enums are omitted rather than guessed.
+Credentials survive reload, restart and mode changes. **Forget local OCF
+credential** requires confirmation and removes only this entry's HA copy. It
+does not reset the soundbar or revoke its key. Back up first; reimport needs
+your saved bundle. Deleting the integration entry removes its Store.
 
-Use this read-only action to inspect the saved entry's audio settings:
-
-```yaml
-action: samsung_soundbar.dump_ocf_status
-data: {}
-```
-
-An optional `hrefs` list selects a subset of the fixed audio allowlist; an empty
-list returns cached diagnostics. With multiple soundbars, add the HA `device_id`.
-The response includes projected audio values, resource errors/support, and
-per-field source/age/TTL, never raw OCF payloads, PSK or client/device OCF UUIDs.
-`dump_discovery_snapshot` also includes this safe OCF section. Coordinator source
-names are now `rpc`, `ocf`, `cloud`; the legacy top-level `local` section remains
-RPC diagnostics. No OBSERVE subscription or arbitrary OCF POST service is exposed.
-
-### Local Q800F Woofer Slider
-
-After OCF authentication and valid Woofer readback, **Woofer** appears as a native
-HA number slider: **-12 to +6 dB, step 1**. It retains the existing
-`<device_id>_sw_woofer_level` unique ID, including across reload and mode changes;
-an existing number entity is reused. Discovery is shared, not polled per entity.
-The older Woofer checkbox controls optional Cloud exposure; the verified local
-Woofer control is discovered automatically. HA entity settings can disable it.
-
-The slider needs fresh OCF level/connection fields, a connected subwoofer and
-fresh, available RPC confirmation that the soundbar is on. Neither creating nor
-using it powers on the soundbar. Each command reads the target resource first,
-checks availability inside the shared command queue, writes once, then requires
-fresh typed readback. Fractions, booleans and out-of-range levels are rejected.
-Ambiguous or rejected commands are never repeated through Cloud or relative keys.
-External app/remote changes arrive through the existing OCF polling tier.
-
-The former Woofer +/- button entities are removed from the owning integration's
-entity registry during setup, in every control mode. They are not recreated
-after an OCF outage. Existing dashboards/automations referencing those buttons
-need to use the Woofer number instead; their configuration is not rewritten.
-The Woofer number retains its existing unique ID and history.
-
-Owner-approved Q800F/1103.1 probes verified -12, -7, -6 and +6 with exact OCF
-readback, in addition to earlier 0/+1 evidence. In particular, -7 is valid over
-OCF, so this path is not restricted to -12 plus the -6..+6 levels. This was a
-bounded sample, not an exhaustive step scan. The original level and power were
-restored. Installation and UI operation in the user's HA still need a field test.
-
-### Local Advanced Audio and SpaceFit
-
-With authenticated OCF access and matching Q800F readback, the integration exposes
-**Bassmode**, **Nightmode**, **Voice Amplifier**, **Virtual**, **Moderate Bass** and
-**SpaceFit Sound** in both Local-only and Hybrid. The original four switch unique
-IDs are unchanged; the new suffixes are `_sw_moderate_bass` and
-`_sw_space_fit_sound`. Controls are discovered per field, not just from the model
-name or an advertised resource. Voice Amplifier is Voice Enhancement, not AVA Pro.
-
-These switches use actual OCF state, not retained Cloud optimism. Each action
-checks fresh target readback and RPC power inside the shared queue, writes one
-integer 0/1 property, then confirms the result. Virtual may lag its ACK; bounded
-GET-only polling waits for convergence without sending the POST again. A new local
-write or fresh local discovery supersedes older Cloud optimism. Unknown fields
-are not shown as Off, and a missing/unsupported field does not disable its neighbors.
-
-Once a field has a verified local route, an outage makes that switch unavailable;
-it never silently replays the action through Cloud. Other RPC controls continue
-working. Neither switch discovery nor a switch action turns on the soundbar.
-Without a matching OCF profile the original four Cloud switches and legacy
-SpaceFit action retain their old routes; Moderate Bass is not guessed over Cloud.
-The Advanced Audio option controls optional Cloud exposure; confirmed local
-switches are discovered automatically and can be disabled in HA entity settings.
-
-Owner-approved protocol probes toggled each of the six fields separately and
-restored every original value with GET confirmation. Neighboring audio fields
-were unchanged and original power was restored. Visual app-to-HA checks and
-operation in different sound modes still need a field test in the installed HA.
-
-### Local Bass and Treble
-
-With authenticated Q800F OCF readback, **Bass** and **Treble** appear as independent
-native sliders in Local-only and Hybrid. Each uses integer levels from -6 to +6
-with step 1, not percentages. No dB unit is inferred from the numeric payload.
-The new unique ID suffixes are `_num_bass_level` and `_num_treble_level`; existing
-Woofer and switch IDs are unchanged. No optional Cloud checkbox is required.
-
-Each action checks fresh target readback and RPC power under the shared command
-lock, sends one tone property, then requires matching readback. The other tone
-property is not sent. Missing, out-of-profile or unsupported fields do not create
-new controls. A proven route stays local until reload: outages make the control
-unavailable, without waking the soundbar, optimistic state or Cloud fallback.
-External changes use the existing shared OCF polling tier.
-
-Owner-approved Q800F/1103.1 probes confirmed -6, -1, +1 and +6 for each property in
-Surround mode. Every probe restored the original level, kept the other tone field,
-EQ and Advanced Audio unchanged, and restored original power. This is a bounded
-sample, not proof of every integer or every sound-mode combination.
-EQ bands, channel levels and Audio Sync writes remain separate future work.
-Installed-HA and visual SmartThings app checks remain pending.
-
-### Control Groups
-
-Default control names use translated prefixes so HA's alphabetic device page
-keeps related settings together: **Sound: ...**, **Source: Input** and
-**Tone: Bass / Treble / Woofer**. Existing unique IDs and entity IDs are retained.
-Names explicitly customized in HA are not overwritten and determine their own
-position in the list. The standard device page does not provide custom sections.
-
-### EQ Diagnostics and Optional Cloud Selector
-
-Local Q800F EQ metadata does not create an **EQ Preset** select. Although preset
-API write/readback has been verified, useful app/DSP behavior has not. Previously
-created local EQ select entries are integration-disabled, retaining their IDs
-and custom names; they no longer appear among active controls. User-disabled
-entries stay disabled. The explicitly optional **Cloud EQ selector** remains
-available only for models with readable legacy Cloud EQ support.
-
-The guarded local diagnostic backend retains the verified `NONE`, `POP`, `JAZZ`,
-`CLASSIC`, `CUSTOM` names, restricted to metadata reported by the device.
-`NONE` is the neutral EQ preset, not the soundbar's power state or Sound Mode.
-
-The verified context is Standard sound mode, Bass Boost off, power on and local
-`currentEQMode: usereq`. Diagnostic writes require that context.
-A command rereads RPC power/sound mode, OCF context and current options under the
-shared queue; missing/error RPC fields cannot reuse old cached prerequisites. It sends
-`EQname` with `action: setEQmode`, and requires exact readback. It never changes
-Sound Mode/Bass Boost or power implicitly, and never retries through Cloud.
-The optional legacy Cloud route keeps its existing safety checks.
-
-Owner-approved preset probes confirmed all five choices and restored initial
-EQ, neighboring settings and each probe's original power/mode. The seven raw
-string-valued `EQband` entries are normalized for read-only diagnostics, without
-inventing frequency labels. Tested band payloads returned ACK without changing
-the curve, so **band writes and band sliders are not enabled**. Further work
-needs an observed working band command; an ACK alone does not authorize it.
-The owner's current SmartThings UI exposes the two Bass/Treble controls, not a
-seven-band equalizer. The dormant API data is not evidence of seven-band UI/DSP
-support on Q800F; band control remains research, not an advertised feature.
-Installed-HA/app field tests and wider sound-mode compatibility remain pending.
+Missing or invalid credentials produce local Repairs that open import in the
+existing entry. Working RPC remains available. OCF reads run in the background,
+not as a startup requirement. Each sweep has bounded reads and 30 seconds between
+completed sweeps; per-field OCF freshness expires after 120 seconds. A successful
+ACK alone is not state readback.
 
 ### Already Copied the Hashed Q800F Store?
 
@@ -395,7 +210,7 @@ backup's permissions. Keep the copied store private: it can contain credentials
 for other devices as well.
 
 You also need the soundbar's **OCF device UUID**, obtained from a trusted
-read-only `/oic/d` probe. It is not the SmartThings cloud device ID, the Tizen
+read-only `/oic/d` probe. It is not the integration's saved device ID, the Tizen
 DUID or the client/owner UUID. This offline tool deliberately does not discover
 the device or print any UUIDs.
 
@@ -461,123 +276,37 @@ but a differently named file can still be accidentally committed.
   troubleshoot. These operations may invalidate the credential. Preserve working
   firmware/app versions in your notes; updates may change the protocol or access.
   A phone backup is not a guarantee that an old App Store app can be reinstalled.
-- Once HA credential storage is implemented, include it in an encrypted HA
+- Include the HA credential Store in an encrypted HA
   backup and keep the [backup emergency kit](https://www.home-assistant.io/more-info/backup-emergency-kit/)
   outside HA. A saved PSK cannot restore a device's ACL or guarantee access after
   a reset or incompatible firmware update.
 
-## Feature Availability
-
-Features are created only when the device exposes the corresponding capability
-or confirmed local transport support. Exact availability varies by model and
-firmware.
-
-| Feature | SmartThings Cloud | Hybrid Q800F |
-| --- | --- | --- |
-| Power, volume and mute | Available when publicly exposed | Local first with Cloud fallback |
-| Input Preset | Read-only for Q800F | Writable through local RPC |
-| Sound Mode | Capability-dependent | Writable with local readback |
-| Sound From | SmartThings status when available | Local streaming-source mapping |
-| Bass Mode, Night Mode, Voice Amplifier, Virtual | Optional optimistic cloud controls | Same cloud-backed behavior |
-| Woofer, EQ and other advanced controls | Device/profile-dependent | Device/profile-dependent |
-| Album artwork | Depends on media metadata supplied by SmartThings | No confirmed local artwork source |
-
 ## Diagnostics
 
-Cloud problems appear under **Settings > System > Repairs**, separately for
-each soundbar. Authorization failures offer **Reconnect SmartThings account**;
-access denied (403), payment required (402), quota/rate limit (429), and repeated
-temporary outages have their own messages. A generic 403 is not proof that a
-subscription is required, and these non-auth failures do not trigger reauth.
+`samsung_soundbar.dump_ocf_status` reads a fixed allowlist of local audio
+resources in Hybrid with a valid credential. Its optional `hrefs: []` returns
+cached diagnostics without new reads. The result contains projected values,
+source/age/TTL and errors, never raw OCF responses, PSK or identity UUIDs.
+Use a Home Assistant `device_id` when multiple soundbars are loaded.
 
-**Open control mode options** opens the existing entry's Options. Switching to
-Local only verifies the host and saved identity before removing OAuth data;
-device and entity IDs are retained. Opening or cancelling a flow does not
-resolve the issue: it clears after successful Cloud recovery, switching to
-Local only, or deleting that entry. Reachable LAN controls in Hybrid continue
-to work during a Cloud failure; cloud-only controls become unavailable.
+`samsung_soundbar.dump_discovery_snapshot` returns a safe local coordinator
+snapshot. Remote execute/status diagnostic actions have been removed.
 
-Cloud polling backs off for access failures and respects numeric `Retry-After`
-on 429 (15-3600 seconds; 60 seconds if absent or invalid). Forced coordinator
-refreshes also respect this cooldown. A 401 gets at most one token refresh
-and retry per request. Routine token rotation does not reload the integration.
-
-Each entry uses one shared Home Assistant state coordinator. Local core state
-is polled every 2 seconds; cloud state every 15 seconds; full local status every
-60 seconds. Entities do not run their own network polls. Fresh local fields take
-priority in Hybrid, while partial responses retain each field's own age and TTL.
-Commands are serialized and followed by targeted local readback. A short write
-settling guard prevents stale replies from immediately undoing a successful command.
-
-The integration provides diagnostic actions under the `samsung_soundbar`
-domain. They are intended for investigating capability differences between
-models and firmware versions.
-
-Example local JSON-RPC probe:
+`samsung_soundbar.dump_local_rpc` probes the configured LAN endpoint directly:
 
 ```yaml
 action: samsung_soundbar.dump_local_rpc
 data:
-  host: 192.168.0.10
+  host: 192.0.2.26
 ```
 
-The result includes power, volume, mute, input source, sound mode, codec and
-local connection errors. Do not publish diagnostic output containing tokens or
-private network details.
-
-`dump_discovery_snapshot` includes coordinator field sources, ages, TTLs and
-pending writes. It also works in Local-only without issuing SmartThings requests;
-cloud-only diagnostic sections are omitted in that mode. Legacy Cloud Advanced
-Audio switches can remain optimistic without readable Cloud state; verified OCF
-switches use authoritative local readback instead.
-
-Cloud status respects explicit `custom.disabledComponents` and
-`custom.disabledCapabilities` lists. Missing/null optional metadata does not
-disable existing features. Disabled Cloud features do not disable LAN controls
-in Hybrid; their Cloud commands are blocked and existing controls become
-unavailable rather than deleting entity-registry entries.
-
-Direct controls can also be tested explicitly, for example:
-
-```yaml
-action: samsung_soundbar.dump_local_rpc
-data:
-  host: 192.168.0.10
-  write_method: volumeControl
-  write_params:
-    volume: 8
-```
-
-This changes the volume to the requested integer (0-100). For a mute probe use
-`write_method: muteControl` and `write_params: {mute: true}` (a boolean).
-The service automatically includes `getVolume`/`getMute` before and after
-the write and returns `write_verification` with `readback_matches` and
-`state_change_observed`. Matching an unchanged value does not prove that the
-write changed anything. A diagnostic probe does not change the integration's
-runtime configuration. Direct volume/mute and relative Woofer keys have been
-verified on Q800F; this does not establish support for every other model.
-
-Bare JSON-RPC errors are reported with their code, including `-32700`. A parse
-error alone is not automatically retried as a write. Known read-only requests
-can refresh a rejected token and retry once, including Q800F's `-32700` response.
-Relative remote-key commands are never automatically replayed. Failed individual
-fields are exposed in diagnostic `local.field_errors` without refreshing their
-cached timestamps; transport/auth failures still mark the LAN connection down.
-The model-only `getIdentifier` is cached in memory after two matching reads;
-explicit diagnostic calls still read it directly. It is never a device identity.
-
-## Limitations
-
-- The SmartThings mobile app can use private Samsung APIs that are not
-  available to this integration through public OAuth.
-- A command returning `COMPLETED` is not sufficient to create a stateful Home
-  Assistant entity; the integration also requires reliable state readback.
-- SmartThings Cloud features require valid OAuth credentials and remain subject
-  to Samsung API availability and policy.
+Optional write probes change settings and must be requested explicitly.
+Commands are not automatically repeated after ambiguous write failures.
+Do not publish tokens, credentials, UUIDs or private network details in reports.
 
 ## Development Tests
 
-Use Python 3.14 in a separate virtual environment:
+Use Python 3.14 in a separate environment:
 
 ```sh
 python3.14 -m venv .venv
@@ -586,17 +315,10 @@ python3.14 -m venv .venv
 .venv/bin/python -m pytest tests/ha -q
 ```
 
-The pinned HA harness runs Home Assistant 2026.9.4. Tests in `tests/ha` use the
-real config-entry manager, entity/device registries, platforms, service calls,
-Repairs, Options and reauth flows. Only external OAuth, SmartThings and LAN
-transports are replaced; network access is blocked. They cover setup,
-reload/unload, external state updates, readback, DHCP recovery, Cloud failures,
-and Local-only migration without changing IDs. API compatibility tests also
-cover successful reauth with changed or unchanged credentials, entry-scoped
-runtime/client isolation, scoped device lookup, OAuth retry classification, and
-entity actions registered before platform setup and retained after unload.
-They do not replace field-tests
-on a Q800F. GitHub Actions runs both suites on pushes and pull requests.
+The pinned HA harness uses real registries, platforms, services and flows with
+mocked LAN transports and blocked network access. Tests cover local migration,
+entry/identity preservation, discovery, availability and guarded readback.
+They do not replace physical-device or installed-HA field tests.
 
 ## Attribution
 

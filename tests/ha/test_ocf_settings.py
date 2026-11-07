@@ -69,8 +69,6 @@ async def test_native_tone_sliders_read_write_and_reload(hass, entry, transports
         "treble_level": 1,
     }
     tone.client.async_write.assert_awaited_once()
-    transports.auth.assert_not_awaited()
-    transports.api.execute_device_command.assert_not_called()
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert registered(hass, entry) == ids
@@ -127,7 +125,6 @@ async def test_unavailable_does_not_remove_entities_wake_or_fallback(
         await entry.runtime_data.device.set_tone_level("bass_level", 2)
     tone.client.async_write.assert_not_awaited()
     transports.rpc.power_on.assert_not_awaited()
-    transports.api.execute_device_command.assert_not_called()
 
 
 async def test_invalid_fraction_and_failed_readback_have_translated_errors(

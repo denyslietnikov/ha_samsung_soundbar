@@ -27,9 +27,24 @@ def _normalize_uuid(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip().lower()
-    if not re.fullmatch(r"uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", normalized):
+    if not re.fullmatch(
+        r"uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", normalized
+    ):
         return None
     return normalized
+
+
+def has_stable_identity(identity: object) -> bool:
+    """A model hint or an unvalidated address cannot establish a device binding."""
+    if not isinstance(identity, dict):
+        return False
+    validators = {
+        "wifi_mac": normalize_mac,
+        "tizen_duid": _normalize_uuid,
+        "upnp_udn": _normalize_uuid,
+    }
+    present = [key for key in validators if key in identity]
+    return bool(present) and all(validators[key](identity[key]) for key in present)
 
 
 async def async_read_local_identity(
@@ -65,7 +80,12 @@ async def async_read_local_identity(
             udn = root.findtext(".//{*}device/{*}UDN")
             if normalized := _normalize_uuid(udn):
                 identity["upnp_udn"] = normalized
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, ElementTree.ParseError):
+    except (
+        aiohttp.ClientError,
+        asyncio.TimeoutError,
+        ValueError,
+        ElementTree.ParseError,
+    ):
         pass
 
     if not identity:

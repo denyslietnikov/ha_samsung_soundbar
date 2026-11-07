@@ -8,9 +8,6 @@
     "@denyslietnikov"
   ],
   "config_flow": true,
-  "dependencies": [
-    "application_credentials"
-  ],
   "dhcp": [
     {"macaddress": "94E6BA*"},
     {"hostname": "tizen*"},
@@ -18,10 +15,9 @@
   ],
   "documentation": "https://github.com/denyslietnikov/ha_samsung_soundbar",
   "integration_type": "hub",
-  "iot_class": "cloud_polling",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/denyslietnikov/ha_samsung_soundbar/issues",
   "requirements": [
-    "pysmartthings>=4.0.3",
     "smartthings-local==0.1.24",
     "cbor2>=6.2.0.post2"
   ],

@@ -1,9 +1,17 @@
 {
     "exceptions": {
-        "ocf_eq_invalid": {"message": "Wählen Sie einen unterstützten EQ-Preset mit seinem genauen Namen."},
-        "ocf_eq_unavailable": {"message": "Der lokale EQ ist nicht verfügbar. Verwenden Sie Standard ohne Bass Boost und prüfen Sie den Betriebszustand und die OCF-Rückmeldung."},
-        "ocf_eq_unconfirmed": {"message": "Die lokale EQ-Änderung wurde nicht bestätigt. Kein erneuter Versuch oder Cloud-Fallback wurde ausgeführt."},
-        "ocf_eq_route_changed": {"message": "Die EQ-Verbindung hat sich während des Wartens geändert. Versuchen Sie es mit der lokalen EQ-Steuerung erneut."},
+        "ocf_eq_invalid": {
+            "message": "Wählen Sie einen unterstützten EQ-Preset mit seinem genauen Namen."
+        },
+        "ocf_eq_unavailable": {
+            "message": "Der lokale EQ ist nicht verfügbar. Verwenden Sie Standard ohne Bass Boost und prüfen Sie den Betriebszustand und die OCF-Rückmeldung."
+        },
+        "ocf_eq_unconfirmed": {
+            "message": "Die lokale EQ-Änderung wurde nicht bestätigt. Kein erneuter Versuch oder Fallback wurde ausgeführt."
+        },
+        "ocf_eq_route_changed": {
+            "message": "Die EQ-Verbindung hat sich während des Wartens geändert. Versuchen Sie es mit der lokalen EQ-Steuerung erneut."
+        },
         "ocf_tone_invalid": {
             "message": "Bass und Höhen müssen ganzzahlige Werte zwischen -6 und 6 sein."
         },
@@ -11,25 +19,42 @@
             "message": "Die lokale Klangregelung ist nicht verfügbar. Prüfen Sie den Betriebszustand und die OCF-Rückmeldung."
         },
         "ocf_tone_unconfirmed": {
-            "message": "Die lokale Klanganpassung wurde nicht bestätigt. Kein erneuter Versuch oder Cloud-Fallback wurde ausgeführt."
+            "message": "Die lokale Klanganpassung wurde nicht bestätigt. Kein erneuter Versuch oder Fallback wurde ausgeführt."
         }
     },
     "entity": {
         "select": {
-            "eq_preset": {"name": "EQ-Preset"},
-            "sound_mode_preset": {"name": "Klang: Modus"},
-            "input_preset": {"name": "Quelle: Eingang"}
+            "sound_mode_preset": {
+                "name": "Klang: Modus"
+            },
+            "input_preset": {
+                "name": "Quelle: Eingang"
+            }
         },
         "number": {
-            "bass_level": {"name": "Ton: Bass"},
-            "treble_level": {"name": "Ton: Höhen"},
-            "woofer_level": {"name": "Ton: Subwoofer"}
+            "bass_level": {
+                "name": "Ton: Bass"
+            },
+            "treble_level": {
+                "name": "Ton: Höhen"
+            },
+            "woofer_level": {
+                "name": "Ton: Subwoofer"
+            }
         },
         "switch": {
-            "bass_mode": {"name": "Klang: Bass Boost"},
-            "night_mode": {"name": "Klang: Nachtmodus"},
-            "voice_amplifier": {"name": "Klang: Sprachverstärker"},
-            "virtual_sound": {"name": "Klang: Virtual"},
+            "bass_mode": {
+                "name": "Klang: Bass Boost"
+            },
+            "night_mode": {
+                "name": "Klang: Nachtmodus"
+            },
+            "voice_amplifier": {
+                "name": "Klang: Sprachverstärker"
+            },
+            "virtual_sound": {
+                "name": "Klang: Virtual"
+            },
             "moderate_bass": {
                 "name": "Klang: Moderater Bass"
             },
@@ -39,108 +64,60 @@
         }
     },
     "issues": {
-        "cloud_auth": {
-            "title": "SmartThings-Autorisierung erforderlich",
+        "ocf_credential": {
+            "title": "Lokaler OCF-Schlüssel benötigt Aufmerksamkeit",
             "fix_flow": {
                 "step": {
                     "choose": {
-                        "title": "Cloud-Problem beheben",
-                        "description": "Die SmartThings-Autorisierung für {name} fehlt, ist abgelaufen oder wurde widerrufen. Verbinden Sie das Konto erneut oder wechseln Sie diesen Eintrag zu Local only. Erreichbare LAN-Steuerungen in Hybrid funktionieren weiterhin; reine Cloud-Steuerungen sind nicht verfügbar.\n\nÖffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
-                        "data": {
-                            "action": "Aktion"
-                        }
+                        "title": "Lokalen OCF-Zugriff wiederherstellen",
+                        "description": "Der lokale OCF-Schlüssel für {name} fehlt, ist ungültig oder nicht mehr autorisiert. Importieren Sie Ihre Sicherung in den Optionen des vorhandenen Eintrags. Sichern Sie bei beschädigtem Speicher zuerst den Schlüssel, bevor Sie ihn vergessen und erneut importieren. Funktionierende RPC-Steuerungen bleiben verfügbar."
                     }
                 },
                 "abort": {
-                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
-                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
+                    "reconfigure": "Fahren Sie im Formular für den lokalen Schlüssel fort.",
+                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie den vorhandenen Eintrag unter Einstellungen > Geräte und Dienste."
                 }
             }
         },
-        "cloud_access": {
-            "title": "SmartThings Cloud verweigert den Zugriff",
+        "ocf_missing_credential": {
+            "title": "Hybrid benötigt einen lokalen OCF-Schlüssel",
             "fix_flow": {
                 "step": {
                     "choose": {
-                        "title": "Cloud-Problem beheben",
-                        "description": "SmartThings verweigert den API-Zugriff für {name} (HTTP 403). Prüfen Sie App-Berechtigungen und Gerätezugriff. Diese Antwort allein beweist nicht, dass ein kostenpflichtiges Abonnement erforderlich ist. Eine erneute Autorisierung startet nicht automatisch. Sie können diesen Eintrag zu Local only wechseln.\n\nÖffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
-                        "data": {
-                            "action": "Aktion"
-                        }
+                        "title": "Lokalen OCF-Schlüssel importieren",
+                        "description": "Für {name} ist Hybrid Local + OCF gewählt, aber kein lokaler OCF-Schlüssel gespeichert. RPC-Steuerungen bleiben verfügbar; OCF-Audioeinstellungen sind noch nicht verbunden. Importieren Sie Ihren gespeicherten Schlüssel in den Optionen dieses Eintrags oder wählen Sie Local only (RPC)."
                     }
                 },
                 "abort": {
-                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
-                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
+                    "reconfigure": "Fahren Sie im Formular für den lokalen Schlüssel fort.",
+                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie den vorhandenen Eintrag unter Einstellungen > Geräte und Dienste."
                 }
             }
         },
-        "cloud_payment": {
-            "title": "SmartThings Cloud verlangt eine Zahlung",
+        "local_configuration": {
+            "title": "Lokale Soundbar-Konfiguration erforderlich",
             "fix_flow": {
                 "step": {
                     "choose": {
-                        "title": "Cloud-Problem beheben",
-                        "description": "SmartThings hat HTTP 402 für {name} zurückgegeben. Prüfen Sie den API-Tarif Ihres Kontos oder wechseln Sie diesen Eintrag zu Local only. Eine erneute OAuth-Autorisierung behebt diese Antwort nicht. Erreichbare LAN-Steuerungen in Hybrid bleiben verfügbar.\n\nÖffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
-                        "data": {
-                            "action": "Aktion"
-                        }
+                        "title": "Lokale Verbindung konfigurieren",
+                        "description": "Für {name} ist kein geprüfter lokaler Host gespeichert. Öffnen Sie die lokale Neukonfiguration dieses vorhandenen Eintrags und bestätigen Sie Host und Gerätekennung. Geräte- und Entitäts-IDs bleiben erhalten; entfernen Sie den Eintrag nicht."
                     }
                 },
                 "abort": {
-                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
-                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
-                }
-            }
-        },
-        "cloud_limit": {
-            "title": "SmartThings Cloud-Anfragelimit erreicht",
-            "fix_flow": {
-                "step": {
-                    "choose": {
-                        "title": "Cloud-Problem beheben",
-                        "description": "SmartThings hat HTTP 429 für {name} zurückgegeben. Cloud-Abfragen pausieren vor dem nächsten Versuch. Es kann ein Anfragelimit oder eine Quote sein, nicht zwingend eine Zahlungspflicht. Behalten Sie Hybrid bis zur Wiederherstellung oder wechseln Sie zu Local only. Erreichbare LAN-Steuerungen bleiben verfügbar.\n\nÖffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
-                        "data": {
-                            "action": "Aktion"
-                        }
-                    }
-                },
-                "abort": {
-                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
-                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
-                }
-            }
-        },
-        "cloud_unavailable": {
-            "title": "SmartThings Cloud vorübergehend nicht erreichbar",
-            "fix_flow": {
-                "step": {
-                    "choose": {
-                        "title": "Cloud-Problem beheben",
-                        "description": "Cloud-Anfragen für {name} sind wiederholt fehlgeschlagen. Home Assistant versucht es erneut. Prüfen Sie die Internetverbindung oder warten Sie auf SmartThings; eine erneute Autorisierung ist bei einem vorübergehenden Ausfall nicht erforderlich. Sie können diesen Eintrag zu Local only wechseln. Erreichbare LAN-Steuerungen in Hybrid bleiben verfügbar.\n\nÖffnen Sie die Optionen für {name}, um den Steuerungsmodus zu ändern, oder autorisieren Sie das Konto bei ungültiger Anmeldung erneut. Local-only prüft Host und Identität vor dem Speichern; Geräte- und Entitäts-IDs bleiben erhalten.",
-                        "data": {
-                            "action": "Aktion"
-                        }
-                    }
-                },
-                "abort": {
-                    "reconfigure": "Fahren Sie mit der gewählten Konfiguration fort. Die Meldung bleibt bis zur Cloud-Wiederherstellung oder dem Wechsel zu Local only bestehen.",
-                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie die Integrationsoptionen unter Einstellungen > Geräte und Dienste."
+                    "reconfigure": "Fahren Sie in der lokalen Neukonfiguration dieses vorhandenen Eintrags fort.",
+                    "repair_flow_unavailable": "Die Konfiguration konnte nicht geöffnet werden. Öffnen Sie den vorhandenen Eintrag unter Einstellungen > Geräte und Dienste."
                 }
             }
         }
     },
-    "application_credentials": {
-        "description": "Erstelle eine SmartThings OAuth-In App mit der SmartThings CLI. Füge diese Redirect URI exakt hinzu: `{redirect_uri}`. Nutze die Scopes `r:devices:*`, `x:devices:*` und `r:locations:*`. Füge `sse` nicht hinzu: SmartThings stellt diesen Scope benutzerdefinierten OAuth-In Apps nicht bereit. Trage danach die erzeugte Client ID und das Client Secret hier ein. [SmartThings CLI Dokumentation]({console_url})"
-    },
-    "config":{
-        "step":{
-            "user":{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Steuerungsmodus wählen",
+                "description": "Verbinden Sie die Soundbar über lokales RPC. Hybrid ergänzt geprüfte OCF-Audioeinstellungen mit einem separat importierten Schlüssel.",
                 "data": {
                     "control_mode": "Steuerungsmodus"
-                  },
-                  "description": "Wähle 'Nur lokal' ohne Samsung-Konto oder einen SmartThings-Modus mit OAuth.",
-                  "title": "Steuerungsmodus wählen"
+                }
             },
             "local": {
                 "data": {
@@ -153,51 +130,38 @@
                 "description": "Aktiviere IP Control auf der Soundbar. Home Assistant prüft die lokale RPC-Verbindung und eine stabile Gerätekennung.",
                 "title": "Lokale Soundbar verbinden"
             },
-            "device":{
-                "data" : {
-                    "device_id": "Soundbar",
-                    "device_name":"Device Name"
-                },
-                "description": "Wähle die SmartThings Soundbar aus, die in Home Assistant hinzugefügt werden soll.",
-                "title": "Soundbar auswählen"
+            "reconfigure": {
+                "title": "Lokale Soundbar konfigurieren",
+                "description": "Speichern Sie einen geprüften lokalen Host für diesen vorhandenen Eintrag. Geräte- und Entitäts-IDs bleiben erhalten.",
+                "data": {
+                    "control_mode": "Steuerungsmodus",
+                    "local_host": "Lokaler Soundbar Host/IP",
+                    "local_port": "Lokaler RPC Port",
+                    "local_verify_ssl": "Lokales SSL Zertifikat prüfen",
+                    "local_timeout": "Lokales RPC Timeout"
+                }
             },
-            "reauth_confirm":{
-                "description": "Verbinde SmartThings erneut mit OAuth. Dies ist notwendig, wenn der Refresh Token widerrufen wurde, abgelaufen ist oder ein alter Personal Access Token Eintrag ersetzt werden muss.",
-                "title": "SmartThings erneut authentifizieren"
-            },
-            "reconfigure_confirm":{
-                "data" : {
-                    "settings_advanced_audio": "'Advanced Audio switches' aktivieren (NightMode, BassMode, VoiceEnhancer, Virtual)",
-                    "settings_eq": "Cloud-EQ-Auswahl aktivieren (unterstützte Modelle)",
-                    "settings_soundmode": "'Soundmode selector' aktivieren",
-                    "settings_woofer": "'Subwoofer Entität' aktivieren",
-                    "device_volume": "Max Volume (int)"
-                },
-                "description": "Einige Soundbars haben verschiedene Featuresets. Wähle bitte aus welche Features von deiner Soundbar supported werden (einsehbar in der SmartThings App).",
-                "title": "Geräte Einstellungen"
+            "confirm_local_identity": {
+                "title": "Lokale Soundbar bestätigen",
+                "description": "Dieses vorhandene Gerät unter {host} verbinden? Lokale Kennung: {identity}. Vorhandene Geräte- und Entitäts-IDs bleiben erhalten."
             }
         },
         "error": {
             "local_cannot_connect": "Verbindung zur lokalen RPC API fehlgeschlagen. Prüfe IP Control, Host, Port und Netzwerk.",
-            "identity_unavailable": "Keine stabile lokale Gerätekennung auf Port 8001 oder 9110 gefunden."
+            "identity_unavailable": "Keine stabile lokale Gerätekennung auf Port 8001 oder 9110 gefunden.",
+            "identity_mismatch": "Dieser Host gehört zu einer anderen Soundbar. Das vorhandene Home Assistant Gerät wurde nicht geändert.",
+            "required": "Dieses Feld ist für den ausgewählten Steuerungsmodus erforderlich."
         },
-        "abort":{
+        "abort": {
             "dhcp_not_configured": "Kein konfigurierter lokaler Soundbar passt zu diesem DHCP-Gerät.",
             "dhcp_host_updated": "Die lokale Adresse wurde geprüft und für den vorhandenen Soundbar aktualisiert.",
             "dhcp_identity_unavailable": "Die lokale Adresse wurde nicht geändert, da die Gerätekennung nicht geprüft werden konnte.",
             "dhcp_identity_mismatch": "Die gefundene Adresse gehört zu einem anderen Gerät. Die Einstellungen wurden nicht geändert.",
             "dhcp_configuration_changed": "Die Soundbar-Konfiguration wurde während der Erkennung geändert. Die Adresse wurde nicht aktualisiert.",
-            "cannot_connect": "Verbindung zu SmartThings fehlgeschlagen. Bitte später erneut versuchen.",
-            "invalid_auth": "SmartThings Authentifizierung fehlgeschlagen.",
-            "missing_configuration": "SmartThings Application Credentials sind nicht konfiguriert.",
-            "missing_credentials": "SmartThings Application Credentials fehlen.",
-            "missing_scopes": "SmartThings hat nicht alle benötigten Berechtigungen erteilt.",
-            "no_devices": "Für dieses Konto wurden keine SmartThings Geräte zurückgegeben.",
-            "oauth_error": "Der SmartThings OAuth Flow hat keine gültigen Daten zurückgegeben.",
             "invalid_control_mode": "Nicht unterstützter Steuerungsmodus.",
-            "reauth_account_mismatch": "Das ausgewählte SmartThings Konto passt nicht zu diesem Soundbar Eintrag.",
-            "reauth_device_unavailable": "Dieses SmartThings Konto kann nicht auf die konfigurierte Soundbar zugreifen.",
-            "reauth_successful": "SmartThings wurde erneut authentifiziert."
+            "already_configured": "Diese Soundbar ist bereits konfiguriert.",
+            "local_host_required": "Öffnen Sie die Optionen des vorhandenen Eintrags und speichern Sie einen geprüften lokalen Host.",
+            "reconfigure_successful": "Die lokale Soundbar-Konfiguration wurde aktualisiert."
         }
     },
     "options": {
@@ -205,12 +169,32 @@
             "cannot_connect": "Verbindung zur lokalen Soundbar RPC API fehlgeschlagen. Prüfe IP Adresse, Port, Netzwerk und die IP Control Einstellung.",
             "identity_unavailable": "Keine stabile lokale Gerätekennung gefunden. Prüfe die Ports 8001 und 9110.",
             "identity_mismatch": "Dieser Host gehört zu einer anderen Soundbar. Das vorhandene Home Assistant Gerät wurde nicht geändert.",
-            "required": "Dieses Feld ist für den ausgewählten Steuerungsmodus erforderlich."
+            "required": "Dieses Feld ist für den ausgewählten Steuerungsmodus erforderlich.",
+            "ocf_invalid": "Das Schlüsselpaket ist ungültig oder hat ein nicht unterstütztes Format.",
+            "ocf_storage": "Der Schlüsselspeicher konnte nicht geprüft werden. Sichern Sie den Schlüssel, bevor Sie ihn vergessen und erneut importieren.",
+            "ocf_auth": "Der Schlüssel konnte die konfigurierte Soundbar nicht authentifizieren. Der bisherige Schlüssel wurde nicht ersetzt.",
+            "ocf_connect": "Lokaler OCF-Zugriff konnte nicht geprüft werden. Prüfen Sie Stromversorgung und LAN-Verbindung.",
+            "ocf_local_required": "Speichern Sie zuerst einen funktionierenden lokalen Host.",
+            "local_cannot_connect": "Verbindung zur lokalen RPC API fehlgeschlagen. Prüfe IP Control, Host, Port und Netzwerk."
         },
         "step": {
             "confirm_local_identity": {
                 "title": "Lokale Soundbar bestätigen",
-                "description": "Dieses Gerät auf lokale Steuerung über {host} umstellen? Lokale Kennung: {identity}. Die SmartThings Autorisierung wird entfernt und muss für einen späteren Cloud Modus erneut eingerichtet werden."
+                "description": "Dieses vorhandene Gerät unter {host} verbinden? Lokale Kennung: {identity}. Vorhandene Geräte- und Entitäts-IDs bleiben erhalten."
+            },
+            "ocf_import": {
+                "title": "Lokalen OCF-Schlüssel importieren",
+                "description": "Fügen Sie den vollständigen Inhalt Ihrer q800f.ocf-credential.json-Sicherung ein. Gerätekennung und Authentifizierung werden vor dem Speichern geprüft. Der lokale Speicher hat eingeschränkte Dateirechte, ist aber nicht verschlüsselt. Bewahren Sie eine verschlüsselte externe Sicherung auf und senden Sie den Schlüssel niemals an den Support. Ein erfolgreicher Import aktiviert Hybrid Local + OCF für diesen Eintrag.",
+                "data": {
+                    "credential_bundle": "Schlüssel-JSON"
+                }
+            },
+            "ocf_forget": {
+                "title": "Lokalen OCF-Schlüssel vergessen",
+                "description": "Nur den lokalen OCF-Schlüssel dieses Eintrags löschen? Zum erneuten Import ist Ihre Sicherung erforderlich. Die Soundbar wird weder zurückgesetzt noch der Schlüssel dort widerrufen. RPC-Einstellungen bleiben unverändert.",
+                "data": {
+                    "confirm": "Lokalen OCF-Schlüssel dieses Eintrags löschen"
+                }
             },
             "init": {
                 "data": {
@@ -219,184 +203,96 @@
                     "local_port": "Lokaler RPC Port",
                     "local_verify_ssl": "Lokales SSL Zertifikat prüfen",
                     "local_timeout": "Lokales RPC Timeout",
-                    "local_fallback_to_cloud": "Bei lokalem RPC Fehler auf SmartThings Cloud zurückfallen",
-                    "settings_advanced_audio": "Advanced Audio Switches aktivieren (Nachtmodus, Bassmodus, Stimmenverstärker, Virtual)",
-                    "settings_eq": "Cloud-EQ-Auswahl aktivieren (unterstützte Modelle)",
-                    "settings_soundmode": "SoundMode Selector aktivieren",
-                    "settings_woofer": "Subwoofer Number Entity aktivieren",
-                    "device_volume": "Maximale Lautstärke"
+                    "device_volume": "Maximale Lautstärke",
+                    "ocf_action": "Lokaler OCF-Schlüssel (andere Änderungen werden beim Import/Vergessen nicht gespeichert)"
                 },
-                "description": "Wähle, welche optionalen Samsung Soundbar Funktionen Home Assistant anzeigen soll. Nicht unterstützte Funktionen können auf manchen Modellen nicht verfügbar sein.",
+                "description": "RPC ist in beiden Modi aktiv. Nur Hybrid Local + OCF verwendet einen gespeicherten OCF-Schlüssel. Audioeinstellungen werden erst nach geprüftem lokalem Readback angezeigt.",
                 "title": "Samsung Soundbar Optionen"
             }
         }
     },
     "selector": {
-        "cloud_repair_action": {
+        "control_mode": {
             "options": {
-                "options": "Steuerungsmodus-Optionen öffnen",
-                "reauth": "SmartThings-Konto erneut verbinden"
+                "local_only": "Local only (RPC)",
+                "hybrid_local_ocf": "Hybrid Local + OCF"
+            }
+        },
+        "ocf_action": {
+            "options": {
+                "keep": "Vorhandenen Schlüssel behalten",
+                "import": "Schlüssel importieren oder ersetzen",
+                "forget": "Lokalen Schlüssel vergessen"
             }
         }
     },
-  "services":{
-    "select_soundmode":{
-        "name": "SoundMode auswählen",
-        "description": "Wähle hier zwischen, 'Standard', 'Surround', 'Game' und 'Adaptive Sound'."
-    },
-    "set_woofer_level":{
-        "name": "Subwoofer Level setzen",
-        "description": "Verändere die Lautstärke deines Subwoofers.",
-        "fields":{
-            "level":{
-                "name": "Volume Level",
-                "description": "Subwoofer Level, von -12 bis +6"
-            }
-        }
-    },
-    "set_night_mode":{
-        "name": "Nachtmodus setzen",
-        "description": "Schalte den 'Nachtmodus' an / aus.",
-        "fields":{
-            "enabled":{
-                "name": "An / ausschalten",
-                "description": "Siehe Name."
-            }
-        }
-    },
-    "set_bass_enhancer":{
-        "name": "Bassmodus setzen",
-        "description": "Schalte den 'Bassmodus' an / aus.",
-        "fields":{
-            "enabled":{
-                "name": "An / ausschalten",
-                "description": "Siehe Name."
-            }
-        }
-    },
-    "set_voice_enhancer":{
-        "name": "Stimmenverbesserer setzen",
-        "description": "Schalte den 'Stimmenverbesserer' an / aus.",
-        "fields":{
-            "enabled":{
-                "name": "An / ausschalten",
-                "description": "Siehe Name."
-            }
-        }
-    },
-    "set_speaker_level":{
-        "name": "Lautsprecher level verändern",
-        "description": "Verändere die Lautstärke der einzelnen Lautsprecher",
-        "fields":{
-                "speaker_identifier": {
-                    "name": "Lautsprecher",
-                    "description": "Auszuwählender Lautsprecher"
-                },
+    "services": {
+        "select_soundmode": {
+            "name": "SoundMode auswählen",
+            "description": "Wähle hier zwischen, 'Standard', 'Surround', 'Game' und 'Adaptive Sound'."
+        },
+        "set_woofer_level": {
+            "name": "Subwoofer Level setzen",
+            "description": "Verändere die Lautstärke deines Subwoofers.",
+            "fields": {
                 "level": {
-                    "name": "Lautstärke Level",
-                    "description": "Lautstärke Level zwischen -6 und 6."
+                    "name": "Volume Level",
+                    "description": "Subwoofer Level, von -12 bis +6"
                 }
             }
-    },
-    "set_rear_speaker_mode":{
-        "name": "Modus der hinteren Lautsprecher setzen",
-        "description": "Nutze deine Rücklautsprecher, als 'Vorder-' oder 'Rücklautsprecher'.",
-        "fields":{
-                "speaker_mode": {
-                    "name": "Lautsprecher Modus",
-                    "description": "Nutze den Lautsprecher als Front oder Rear Speaker."
+        },
+        "set_night_mode": {
+            "name": "Nachtmodus setzen",
+            "description": "Schalte den 'Nachtmodus' an / aus.",
+            "fields": {
+                "enabled": {
+                    "name": "An / ausschalten",
+                    "description": "Siehe Name."
                 }
             }
-    },
-    "set_active_voice_amplifier":{
-        "name": "Stimmenverstärker setzen",
-        "description": "Schalte den 'Stimmenverstärker' an / aus.",
-        "fields":{
-            "enabled":{
-                "name": "An / ausschalten",
-                "description": "Siehe Name."
+        },
+        "set_bass_enhancer": {
+            "name": "Bassmodus setzen",
+            "description": "Schalte den 'Bassmodus' an / aus.",
+            "fields": {
+                "enabled": {
+                    "name": "An / ausschalten",
+                    "description": "Siehe Name."
+                }
             }
-        }
-    },
-    "set_space_fit_sound":{
-        "name": "SpaceFitSound setzen",
-        "description": "Schalte den 'SpaceFitSound' an / aus.",
-        "fields":{
-            "enabled":{
-                "name": "An / ausschalten",
-                "description": "Siehe Name."
+        },
+        "set_voice_enhancer": {
+            "name": "Stimmenverbesserer setzen",
+            "description": "Schalte den 'Stimmenverbesserer' an / aus.",
+            "fields": {
+                "enabled": {
+                    "name": "An / ausschalten",
+                    "description": "Siehe Name."
+                }
             }
-        }
-    },
-    "dump_execute_payload":{
-        "name": "Execute Payload ausgeben",
-        "description": "SmartThings execute hrefs abfragen und die rohen Payload-Daten für Diagnose zurückgeben.",
-        "fields":{
-            "device_id":{
-                "name": "Gerät",
-                "description": "Samsung Soundbar Gerät. Nur erforderlich, wenn mehrere Soundbars geladen sind."
-            },
-            "preset":{
-                "name": "Preset",
-                "description": "Bekannte SmartThings execute href Gruppe. Wird ignoriert, wenn href gesetzt ist."
-            },
-            "href":{
-                "name": "Href",
-                "description": "Eigener execute href, zum Beispiel /sec/networkaudio/advancedaudio."
-            },
-            "write_property":{
-                "name": "Write probe property",
-                "description": "Optional explicit write probe property. Requires href and write_value. This may change the soundbar setting."
-            },
-            "write_value":{
-                "name": "Write probe value",
-                "description": "Optional explicit write probe value. Used only with write_property and href. This may change the soundbar setting."
+        },
+        "set_space_fit_sound": {
+            "name": "SpaceFitSound setzen",
+            "description": "Schalte den 'SpaceFitSound' an / aus.",
+            "fields": {
+                "enabled": {
+                    "name": "An / ausschalten",
+                    "description": "Siehe Name."
+                }
             }
-        }
-    },
-    "dump_status_summary":{
-        "name": "Status Zusammenfassung ausgeben",
-        "description": "Kompakte SmartThings Status Capability Zusammenfassung für Diagnose zurückgeben.",
-        "fields":{
-            "device_id":{
-                "name": "Gerät",
-                "description": "Samsung Soundbar Gerät. Nur erforderlich, wenn mehrere Soundbars geladen sind."
-            },
-            "include_null":{
-                "name": "Null-Werte einbeziehen",
-                "description": "Capabilities und Attribute mit null-Wert einbeziehen."
-            }
-        }
-    },
-    "dump_discovery_snapshot":{
-        "name": "Discovery Snapshot ausgeben",
-        "description": "Rohe und flache SmartThings Statusdaten für Before/After Diagnose zurückgeben.",
-        "fields":{
-            "device_id":{
-                "name": "Gerät",
-                "description": "Samsung Soundbar Gerät. Nur erforderlich, wenn mehrere Soundbars geladen sind."
-            },
-            "include_null":{
-                "name": "Null-Werte einbeziehen",
-                "description": "Capabilities und Attribute mit null-Wert einbeziehen."
-            },
-            "include_raw_status":{
-                "name": "Rohen Status einbeziehen",
-                "description": "Vollständige rohe /status Antwort einbeziehen. Diese kann groß sein."
-            },
-            "include_flattened_status":{
-                "name": "Flachen Status einbeziehen",
-                "description": "Dot-Path Statuswerte einbeziehen, die vor und nach einer Änderung leichter vergleichbar sind."
-            },
-            "include_execute_status":{
-                "name": "Execute Status einbeziehen",
-                "description": "Rohen execute Capability Status und extrahierten execute Payload einbeziehen."
-            },
-            "execute_hrefs":{
-                "name": "Execute hrefs",
-                "description": "Optionale hidden execute hrefs während des Snapshots abfragen. Leer lassen für einen nicht verändernden Status-Snapshot."
+        },
+        "dump_discovery_snapshot": {
+            "name": "Lokalen Erkennungsstatus ausgeben",
+            "description": "Lokale RPC- und OCF-Werte, Aktualität und ausstehende Schreibvorgänge ausgeben. Keine Schlüssel oder rohen Antwortdaten.",
+            "fields": {
+                "device_id": {
+                    "name": "Gerät",
+                    "description": "Nur erforderlich, wenn mehrere Soundbars geladen sind."
+                },
+                "include_null": {
+                    "name": "Unbekannte Werte einbeziehen"
+                }
             }
         }
     }
-  }
 }

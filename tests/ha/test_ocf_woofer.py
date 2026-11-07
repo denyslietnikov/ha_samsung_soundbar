@@ -1,7 +1,7 @@
 """Real HA Woofer slider, stable IDs, route availability and service validation."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -74,8 +74,6 @@ async def test_existing_number_id_becomes_local_slider_with_actual_db_readback(
     woofer.client.async_write.assert_awaited_once_with(
         HREF, {FIELD: -7}, woofer_profile=Q800F_WOOFER
     )
-    transports.auth.assert_not_awaited()
-    transports.api.execute_device_command.assert_not_called()
     before = registered(hass, entry)
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
@@ -145,17 +143,3 @@ async def test_off_or_ocf_error_does_not_wake_device_or_fallback_to_relative_com
     assert registered(hass, entry) == ids
     transports.rpc.remote_key.assert_not_awaited()
     transports.rpc.power_on.assert_not_awaited()
-    transports.auth.assert_not_awaited()
-
-
-async def test_cloud_disabled_execute_does_not_disable_verified_ocf_number(
-    hass, entry, transports, woofer
-):
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    device = entry.runtime_data.device
-    device.cloud_feature_disabled = MagicMock(return_value=True)
-    device.coordinator.state.discard_cloud_fields({"woofer_level"})
-    device.coordinator.publish()
-    await hass.async_block_till_done()
-    assert hass.states.get(registered(hass, entry)[UNIQUE][0]).state == "-6"

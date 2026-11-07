@@ -1,4 +1,4 @@
-"""One polling and command owner for Local-only, Hybrid and Cloud entries."""
+"""One polling and command owner for RPC and optional local OCF."""
 
 import asyncio
 import logging
@@ -8,22 +8,8 @@ from time import monotonic
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event
-from homeassistant.exceptions import (
-    ConfigEntryAuthFailed,
-    ConfigEntryNotReady,
-    HomeAssistantError,
-)
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from pysmartthings.exceptions import (
-    SmartThingsConnectionError,
-    SmartThingsForbiddenError,
-    SmartThingsRateLimitError,
-)
 
-from .cloud_errors import CloudAccessError, CloudRateLimitError
-from .cloud_repairs import get_cloud_repairs
-from .const import CONF_LOCAL_FALLBACK_TO_CLOUD
-from .entry_options import get_entry_option
 from .local_ocf import OcfError
 from .local_rpc import LocalRpcError
 from .ocf_credentials import async_complete
@@ -32,12 +18,11 @@ from .state import SoundbarState, StateSnapshot
 
 LOGGER = logging.getLogger(__name__)
 LOCAL_INTERVAL = timedelta(seconds=2)
-CLOUD_INTERVAL = timedelta(seconds=15)
 FULL_LOCAL_INTERVAL = 60.0
 OCF_INTERVAL = 30.0
 
 
-def coordinated_command(expected=None, *, cloud_only=False, read_fields=()):
+def coordinated_command(expected=None, *, read_fields=()):
     """Route existing device commands through the entry's transaction queue."""
 
     def decorate(method):
@@ -50,7 +35,6 @@ def coordinated_command(expected=None, *, cloud_only=False, read_fields=()):
             return await coordinator.async_write(
                 lambda: method(device, *args, **kwargs),
                 values,
-                cloud_only=cloud_only,
                 read_fields=read_fields,
             )
 
@@ -66,27 +50,23 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             LOGGER,
             config_entry=entry,
             name=f"Soundbar {device.device_name}",
-            update_interval=LOCAL_INTERVAL if device.hybrid_mode else CLOUD_INTERVAL,
+            update_interval=LOCAL_INTERVAL,
             always_update=False,
         )
         self.device = device
-        self.state = SoundbarState(
-            local=device.hybrid_mode, cloud=not device.local_only, clock=clock
-        )
+        self.state = SoundbarState(local=device.local_rpc_enabled, clock=clock)
         self._clock = clock
         self._poll_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
         self._command_task = None
-        self._next_cloud = 0.0
-        self._cloud_retry_until = 0.0
         self._next_full_local = 0.0
-        self._reauth_started = False
-        self.cloud_repairs = get_cloud_repairs(hass, entry)
         self._batching = False
         self._last_cycle_finished = float("-inf")
         self._force_refresh = False
         self.ocf = None
         self._ocf_task = None
+        self._ocf_detach_task = None
+        self._ocf_detaching = False
         self._next_ocf = 0.0
         self._ocf_resources = {}
         self._shutdown_task = None
@@ -109,6 +89,8 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
 
     def transport_changed(self, source, available):
         source = "rpc" if source == "local" else source
+        if source not in self.state.transport_available:
+            raise ValueError("Unknown local transport")
         self.state.transport_available[source] = available
         self.publish()
 
@@ -120,90 +102,97 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             self._batching = True
             try:
                 if self._force_refresh:
-                    self._next_cloud = self._next_full_local = self._next_ocf = 0.0
+                    self._next_full_local = self._next_ocf = 0.0
                     self._force_refresh = False
                 now = self._clock()
                 self._schedule_ocf()
-                if self.device.hybrid_mode:
+                if self.device.local_rpc_enabled:
                     if now >= self._next_full_local:
                         await self.device.update_local_status(min_age=None)
                         if self.device.local_last_error is None:
                             self._next_full_local = self._clock() + FULL_LOCAL_INTERVAL
                     else:
                         await self.device.update_local_input_source(min_age=None)
-                if (
-                    not self.device.local_only
-                    and not self._reauth_started
-                    and now >= self._next_cloud
-                ):
-                    await self._refresh_cloud()
                 return self.state.snapshot()
             finally:
                 self._batching = False
                 self._last_cycle_finished = monotonic()
 
-    async def _refresh_cloud(self, *, force=False):
-        if (
-            self._reauth_started
-            or self._clock() < self._cloud_retry_until
-            or (not force and self._clock() < self._next_cloud)
-        ):
-            return
-        try:
-            await self.device.update_cloud_status()
-        except ConfigEntryAuthFailed as err:
-            self.cloud_failed(err)
-        except (
-            ConfigEntryNotReady,
-            SmartThingsConnectionError,
-            SmartThingsForbiddenError,
-            SmartThingsRateLimitError,
-            HomeAssistantError,
-        ) as err:
-            self.cloud_failed(err)
-        else:
-            self.cloud_repairs.recovered()
-            self._cloud_retry_until = 0.0
-            self._next_cloud = self._clock() + CLOUD_INTERVAL.total_seconds()
-            if getattr(self.device, "cloud_setup_pending", False):
-                self.device.cloud_setup_pending = False
-                self.hass.config_entries.async_schedule_reload(
-                    self.config_entry.entry_id
-                )
-
-    def cloud_failed(self, error):
-        self.device.handle_smartthings_availability(False)
-        self._next_cloud = self._clock() + self.cloud_repairs.failed(error)
-        self._cloud_retry_until = self._next_cloud
-        if isinstance(error, ConfigEntryAuthFailed) and not self._reauth_started:
-            self._reauth_started = True
-            self.config_entry.async_start_reauth(self.hass)
-
     async def async_refresh_all(self):
         """Refresh configured tiers and await the shared OCF diagnostic sweep."""
         self._force_refresh = True
         await self.async_refresh()
-        if self._ocf_task is not None:
-            await asyncio.shield(self._ocf_task)
+        await self._async_wait_ocf_poll()
+
+    async def _async_wait_ocf_poll(self):
+        task = self._ocf_task
+        if task is not None:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                if not task.cancelled() or asyncio.current_task().cancelling():
+                    raise
 
     def configure_ocf(self, client):
         """Attach the optional transport to this coordinator, never per entity."""
+        if (
+            self._ocf_detaching
+            or self._shutdown_requested
+            or self.ocf is not None
+            and client is not self.ocf
+        ):
+            raise RuntimeError("Await async_detach_ocf() before replacing the client")
+        self._ocf_detach_task = None
         self.ocf = client
         if client is not None and self._unsub_stop is None:
             self._unsub_stop = self.hass.bus.async_listen_once(
                 EVENT_HOMEASSISTANT_STOP, self._async_handle_stop
             )
-            self.config_entry.async_on_unload(self._unsub_stop)
-        self.state.use_ocf = client is not None and self.device.hybrid_mode
-        self.state.ocf_cloud_fallback = bool(
-            get_entry_option(self.config_entry, CONF_LOCAL_FALLBACK_TO_CLOUD)
-        )
+            self.config_entry.async_on_unload(self._remove_stop_listener)
+        self.state.use_ocf = client is not None and self.device.ocf_enabled
         self._next_ocf = 0.0
         self._schedule_ocf()
+
+    async def async_detach_ocf(self):
+        """Drain OCF transactions and close once, despite caller cancellation."""
+        if self._ocf_detach_task is None:
+            self._ocf_detaching = True
+            self._ocf_detach_task = self.hass.async_create_task(
+                self._async_detach_ocf(), "soundbar_ocf_detach"
+            )
+        _, cancelled = await async_complete(self._ocf_detach_task)
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _async_detach_ocf(self):
+        try:
+            # Polling can own the write lock, so cancel and drain it before locking.
+            if self._ocf_task is not None:
+                if not self._ocf_task.done():
+                    self._ocf_task.cancel()
+                try:
+                    await self._ocf_task
+                except asyncio.CancelledError:
+                    pass
+            async with self._write_lock, self._poll_lock:
+                client = self.ocf
+                self.ocf = None
+                self.state.use_ocf = False
+                self.state.transport_available["ocf"] = False
+                self.state.invalidate("ocf", OCF_FIELDS)
+                self.state.ocf_unavailable_fields.clear()
+                self._ocf_resources.clear()
+            # No transaction retains the client; closing must not block RPC.
+            if client is not None:
+                await client.async_close()
+        finally:
+            self._ocf_detaching = False
+            self.publish()
 
     def _schedule_ocf(self):
         if (
             not self.state.use_ocf
+            or self._ocf_detaching
             or self._shutdown_requested
             or self._clock() < self._next_ocf
             or self._ocf_task is not None
@@ -217,7 +206,7 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         try:
             for href in POLL_HREFS:
                 async with self._write_lock:
-                    if self._shutdown_requested:
+                    if self._shutdown_requested or self._ocf_detaching:
                         return
                     kind = await self._read_ocf(href)
                 if kind in {"auth", "identity", "transport", "backoff", "closed"}:
@@ -254,7 +243,7 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
     def _ocf_failed(self, href, kind):
         self._ocf_resources[href] = {"last_error": kind, "supported": None}
         self.state.ocf_unavailable_fields.update(RESOURCE_FIELDS[href])
-        self.transport_changed("ocf", bool(self.ocf.available))
+        self.transport_changed("ocf", self.ocf is not None and bool(self.ocf.available))
 
     async def async_ocf_snapshot(self, hrefs=POLL_HREFS):
         """Read only the fixed audio projection, never return raw OCF responses."""
@@ -263,13 +252,23 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             href not in POLL_HREFS for href in hrefs
         ):
             raise OcfError("unverified")
-        if hrefs and self.ocf is not None and self.state.use_ocf:
+        if (
+            hrefs
+            and self.ocf is not None
+            and self.state.use_ocf
+            and not self._ocf_detaching
+        ):
             # Join the current sweep, then serialize explicitly requested reads.
             if self._ocf_task is not None and not self._ocf_task.done():
-                await asyncio.shield(self._ocf_task)
+                await self._async_wait_ocf_poll()
             async with self._write_lock:
                 for href in dict.fromkeys(hrefs):
-                    if self._shutdown_requested:
+                    if (
+                        self._shutdown_requested
+                        or self._ocf_detaching
+                        or self.ocf is None
+                        or not self.state.use_ocf
+                    ):
                         break
                     kind = await self._read_ocf(href)
                     if kind in {"auth", "identity", "transport", "backoff", "closed"}:
@@ -345,6 +344,8 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         rpc_fields=(),
     ):
         """Internal verified-route command; never an arbitrary public POST action."""
+        if self._ocf_detaching or self._shutdown_requested:
+            raise OcfError("closed")
         if self.ocf is None or not self.state.use_ocf or href not in RESOURCE_FIELDS:
             raise OcfError("unverified")
         if not set(rpc_fields) <= {"power", "sound_mode"}:
@@ -356,7 +357,12 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         ):
             raise OcfError("unverified")
         async with self._write_lock, self._poll_lock:
-            if self._shutdown_requested:
+            if (
+                self._shutdown_requested
+                or self._ocf_detaching
+                or self.ocf is None
+                or not self.state.use_ocf
+            ):
                 raise OcfError("closed")
             try:
                 if guard is not None:
@@ -428,55 +434,40 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             raise asyncio.CancelledError
 
     async def _async_handle_stop(self, _event: Event) -> None:
+        # The one-shot bus listener has already removed itself.
+        self._unsub_stop = None
         await self.async_shutdown()
 
-    async def _async_shutdown(self):
-        await super().async_shutdown()
+    def _remove_stop_listener(self):
         if self._unsub_stop is not None:
             self._unsub_stop()
             self._unsub_stop = None
-        try:
-            if self._ocf_task is not None and not self._ocf_task.done():
-                self._ocf_task.cancel()
-                try:
-                    await self._ocf_task
-                except asyncio.CancelledError:
-                    pass
-        finally:
-            if self.ocf is not None:
-                await self.ocf.async_close()
 
-    async def async_write(self, action, expected, *, cloud_only=False, read_fields=()):
+    async def _async_shutdown(self):
+        await super().async_shutdown()
+        self._remove_stop_listener()
+        await self.async_detach_ocf()
+
+    async def async_write(self, action, expected, *, read_fields=()):
+        fields = set(expected) | set(read_fields)
+        if not self.device.local_rpc_enabled or fields & OCF_FIELDS:
+            raise LocalRpcError("RPC command requires locally owned fields")
+        if "input_source" in fields:
+            fields |= {"power", "sound_from_detail_name"}
         async with self._write_lock, self._poll_lock:
+            if self._shutdown_requested:
+                raise LocalRpcError("RPC coordinator is closed")
             self._command_task = asyncio.current_task()
             self._batching = True
             try:
+                self.state.begin_write(fields, source="rpc")
                 result = await action()
-                self.state.expect(
-                    expected,
-                    source="cloud"
-                    if cloud_only or not self.device.hybrid_mode
-                    else "rpc",
-                    write_only=cloud_only
-                    and bool(expected)
-                    and set(expected)
-                    <= {"night_mode", "bass_mode", "voice_amplifier", "virtual_sound"},
-                )
-                if (
-                    self.device.hybrid_mode
-                    and not cloud_only
-                    and self.device.local_last_error is None
-                ):
-                    await self._read_after_write(set(expected) | set(read_fields))
-                elif not self.device.local_only:
-                    await self._refresh_cloud(force=True)
+                self.state.expect(expected, source="rpc")
+                if fields:
+                    await self._read_after_write(fields)
                 return result
-            except (
-                CloudAccessError,
-                CloudRateLimitError,
-                ConfigEntryAuthFailed,
-            ) as err:
-                self.cloud_failed(err)
+            except asyncio.CancelledError:
+                self.state.invalidate("rpc", fields)
                 raise
             finally:
                 self._command_task = None

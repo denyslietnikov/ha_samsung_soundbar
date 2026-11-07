@@ -1,17 +1,15 @@
-"""Real HA fixtures; replace only OAuth, Cloud and LAN transports."""
+"""Real HA fixtures; replace only local transports and identity discovery."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pysmartthings import Status
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.samsung_soundbar.const import (
     CONF_CONTROL_MODE,
     CONF_ENTRY_DEVICE_ID,
     CONF_ENTRY_DEVICE_NAME,
-    CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES,
     CONF_LOCAL_HOST,
     CONF_LOCAL_IDENTITY,
     CONF_LOCAL_PORT,
@@ -56,14 +54,13 @@ def entry(hass):
             CONF_LOCAL_HOST: "192.0.2.26",
             CONF_LOCAL_PORT: 1516,
             CONF_LOCAL_IDENTITY: dict(IDENTITY),
-            CONF_ENTRY_SETTINGS_ADVANCED_AUDIO_SWITCHES: False,
         },
     )
     entry.add_to_hass(hass)
     return entry
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def transports():
     rpc = MagicMock()
     rpc.status = AsyncMock(return_value=LOCAL_STATUS)
@@ -75,30 +72,6 @@ def transports():
     rpc.set_volume = AsyncMock()
     rpc.set_sound_mode = AsyncMock()
     rpc.select_source = AsyncMock()
-    api = MagicMock()
-    api.get_device = AsyncMock(
-        return_value=SimpleNamespace(
-            device_id="existing-cloud-id",
-            location_id="test-location",
-            room_id=None,
-        )
-    )
-    api.get_device_status = AsyncMock(
-        return_value={
-            "main": {
-                "switch": {"switch": Status(value="on")},
-                "audioVolume": {"volume": Status(value=8)},
-                "audioMute": {"mute": Status(value="unmuted")},
-                "ocf": {
-                    "mnmo": Status(value="HW-Q800F"),
-                    "mnmn": Status(value="Samsung Electronics"),
-                },
-            }
-        }
-    )
-    provider = SimpleNamespace(
-        api=api, async_get_access_token=AsyncMock(return_value="test-token")
-    )
     http = MagicMock()
     http.get = AsyncMock(side_effect=AssertionError("Unexpected real Cloud GET"))
     http.post = AsyncMock(side_effect=AssertionError("Unexpected real Cloud POST"))
@@ -110,11 +83,6 @@ def transports():
             "custom_components.samsung_soundbar.LocalSoundbarRpcClient",
             return_value=rpc,
         ) as factory,
-        patch(
-            "custom_components.samsung_soundbar.SmartThingsAuthProvider.async_create",
-            new_callable=AsyncMock,
-            return_value=provider,
-        ) as auth,
         patch(
             "custom_components.samsung_soundbar.async_get_clientsession",
             return_value=http,
@@ -144,6 +112,4 @@ def transports():
     ):
         rpc.create_token = AsyncMock()
         rpc.call = AsyncMock(return_value={"identifier": "22_AV_HW-Q800F"})
-        yield SimpleNamespace(
-            rpc=rpc, api=api, auth=auth, provider=provider, factory=factory, http=http
-        )
+        yield SimpleNamespace(rpc=rpc, factory=factory, http=http)

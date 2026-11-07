@@ -8,8 +8,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.samsung_soundbar import number
 from custom_components.samsung_soundbar.const import (
-    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
-    CONTROL_MODE_LOCAL_ONLY,
+    CONTROL_MODE_HYBRID_LOCAL_OCF,
 )
 from custom_components.samsung_soundbar.local_ocf import OcfError, OcfWriteResult
 
@@ -21,7 +20,7 @@ class TestOcfTone(IsolatedAsyncioTestCase):
     setUp = fixtures.TestCoordinator.setUp
     make_device = fixtures.TestCoordinator.make_device
 
-    def prepare(self, mode=CONTROL_MODE_LOCAL_ONLY):
+    def prepare(self, mode=CONTROL_MODE_HYBRID_LOCAL_OCF):
         device, coordinator = self.make_device(mode)
         self.values = {PREFIX + "bass": 0, PREFIX + "treble": 1}
         client = MagicMock()
@@ -74,7 +73,6 @@ class TestOcfTone(IsolatedAsyncioTestCase):
         self.assertEqual(device.tone_level("bass_level"), -2)
         self.assertEqual(device.tone_level("treble_level"), 1)
         self.assertNotIn("bass_level", coordinator.state.pending)
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_invalid_values_are_rejected_without_io(self):
         device, coordinator, client = self.prepare()
@@ -113,7 +111,6 @@ class TestOcfTone(IsolatedAsyncioTestCase):
             await device.set_tone_level("bass_level", 1)
         client.async_write.assert_not_awaited()
         self.rpc.power_on.assert_not_called()
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_mismatch_is_not_success_or_optimistic_state(self):
         device, coordinator, client = self.prepare()
@@ -144,16 +141,12 @@ class TestOcfTone(IsolatedAsyncioTestCase):
         client.async_write.assert_not_awaited()
 
     async def test_hybrid_transport_failure_never_replays_tone_over_cloud(self):
-        device, coordinator, client = self.prepare(
-            CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
-        )
+        device, coordinator, client = self.prepare(CONTROL_MODE_HYBRID_LOCAL_OCF)
         await coordinator.async_refresh_all()
-        self.cloud.status.refresh.reset_mock()
         client.async_write.side_effect = OcfError("transport")
         with self.assertRaises(HomeAssistantError):
             await device.set_tone_level("bass_level", 1)
         client.async_write.assert_awaited_once()
-        self.cloud.status.refresh.assert_not_awaited()
         self.assertEqual(device.tone_level("bass_level"), 0)
 
     async def test_invalid_and_expired_fields_do_not_invent_valid_zero(self):

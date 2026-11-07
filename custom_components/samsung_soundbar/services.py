@@ -17,21 +17,6 @@ ENTITY_SERVICES = (
     ("set_bass_enhancer", {vol.Required("enabled"): bool}, "async_set_bass_mode"),
     ("set_voice_enhancer", {vol.Required("enabled"): bool}, "async_set_voice_mode"),
     (
-        "set_speaker_level",
-        {vol.Required("speaker_identifier"): str, vol.Required("level"): int},
-        "async_set_speaker_level",
-    ),
-    (
-        "set_rear_speaker_mode",
-        {vol.Required("speaker_mode"): str},
-        "async_set_rear_speaker_mode",
-    ),
-    (
-        "set_active_voice_amplifier",
-        {vol.Required("enabled"): bool},
-        "async_set_active_voice_amplifier",
-    ),
-    (
         "set_space_fit_sound",
         {vol.Required("enabled"): bool},
         "async_set_space_fit_sound",

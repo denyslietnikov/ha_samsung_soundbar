@@ -17,9 +17,8 @@ from custom_components.samsung_soundbar.const import (
     CONF_LOCAL_PORT,
     CONF_LOCAL_TIMEOUT,
     CONF_LOCAL_VERIFY_SSL,
-    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+    CONTROL_MODE_HYBRID_LOCAL_OCF,
     CONTROL_MODE_LOCAL_ONLY,
-    CONTROL_MODE_SMARTTHINGS_CLOUD,
 )
 from custom_components.samsung_soundbar.local_identity import LocalIdentityError
 
@@ -46,7 +45,7 @@ class TestDhcpRecovery(IsolatedAsyncioTestCase):
         self.entry.disabled_by = None
         self.entry.data = {
             CONF_ENTRY_DEVICE_ID: "existing-cloud-id",
-            CONF_CONTROL_MODE: CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+            CONF_CONTROL_MODE: CONTROL_MODE_HYBRID_LOCAL_OCF,
             CONF_LOCAL_HOST: OLD_HOST,
             CONF_LOCAL_IDENTITY: dict(IDENTITY),
             "token": {"access_token": "test-oauth-token"},
@@ -175,7 +174,7 @@ class TestDhcpRecovery(IsolatedAsyncioTestCase):
 
     async def test_cloud_disabled_or_unbound_entries_are_ignored(self) -> None:
         scenarios = [
-            (CONTROL_MODE_SMARTTHINGS_CLOUD, None, IDENTITY),
+            ("unsupported_mode", None, IDENTITY),
             (CONTROL_MODE_LOCAL_ONLY, "user", IDENTITY),
             (CONTROL_MODE_LOCAL_ONLY, None, {}),
             (CONTROL_MODE_LOCAL_ONLY, None, {"tizen_duid": IDENTITY["tizen_duid"]}),
@@ -235,7 +234,7 @@ class TestDhcpRecovery(IsolatedAsyncioTestCase):
     async def test_configuration_changed_while_probing_is_not_overwritten(self) -> None:
         for key, value in (
             (CONF_LOCAL_HOST, "192.0.2.99"),
-            (CONF_CONTROL_MODE, CONTROL_MODE_SMARTTHINGS_CLOUD),
+            (CONF_CONTROL_MODE, "unsupported_mode"),
             (CONF_LOCAL_IDENTITY, {"wifi_mac": "00:11:22:33:44:55"}),
         ):
             with self.subTest(key=key):

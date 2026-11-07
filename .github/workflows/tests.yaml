@@ -27,13 +27,17 @@ jobs:
         run: python -m unittest discover -s tests -q
       - name: Real HA runtime tests (network blocked)
         run: python -m pytest tests/ha -q
-      - name: Lint HA lifecycle, Cloud Repairs and runtime tests
+      - name: Lint HA lifecycle, local Repairs and runtime tests
         run: >-
           ruff check
           custom_components/samsung_soundbar/__init__.py
-          custom_components/samsung_soundbar/auth.py
           custom_components/samsung_soundbar/config_flow.py
+          custom_components/samsung_soundbar/const.py
+          custom_components/samsung_soundbar/api_extension/SoundbarDevice.py
+          custom_components/samsung_soundbar/dhcp_recovery.py
           custom_components/samsung_soundbar/device_info.py
+          custom_components/samsung_soundbar/entry_migration.py
+          custom_components/samsung_soundbar/entry_options.py
           custom_components/samsung_soundbar/entity_updates.py
           custom_components/samsung_soundbar/entity_migrations.py
           custom_components/samsung_soundbar/media_player.py
@@ -42,21 +46,25 @@ jobs:
           custom_components/samsung_soundbar/select.py
           custom_components/samsung_soundbar/sensor.py
           custom_components/samsung_soundbar/services.py
-          custom_components/samsung_soundbar/subscription.py
           custom_components/samsung_soundbar/switch.py
-          custom_components/samsung_soundbar/cloud_errors.py
-          custom_components/samsung_soundbar/cloud_repairs.py
           custom_components/samsung_soundbar/repairs.py
-          tests/ha tests/test_cloud_errors.py tests/test_metadata.py
+          tests/ha tests/test_no_cloud_contract.py tests/test_metadata.py
           scripts/extract_ocf_credential.py tests/test_ocf_credential_import.py
           scripts/recover_q800f_credential.py tests/test_ocf_credential_recovery.py
           custom_components/samsung_soundbar/local_ocf.py
+          custom_components/samsung_soundbar/local_device.py
+          custom_components/samsung_soundbar/local_identity.py
+          custom_components/samsung_soundbar/local_rpc.py
           custom_components/samsung_soundbar/ocf_credentials.py
           custom_components/samsung_soundbar/ocf_repairs.py
           custom_components/samsung_soundbar/ocf_state.py
           custom_components/samsung_soundbar/ocf_profiles.py
           custom_components/samsung_soundbar/state.py
           custom_components/samsung_soundbar/coordinator.py
+          tests/test_coordinator.py tests/test_hybrid_state.py
+          tests/test_local_device_contract.py tests/test_local_transport_state.py
+          tests/test_dhcp_recovery.py tests/test_local_identity.py
+          tests/test_local_rpc.py tests/test_local_rpc_diagnostics.py
           tests/test_local_ocf.py tests/test_ocf_credentials.py
           tests/test_ocf_state.py
           tests/test_ocf_woofer.py

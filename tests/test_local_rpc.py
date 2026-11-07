@@ -620,7 +620,7 @@ class TestLocalRpc(IsolatedAsyncioTestCase):
                     MagicMock(),
                     100,
                     "Q800F",
-                    control_mode="hybrid_local_smartthings",
+                    control_mode="hybrid_local_ocf",
                     local_rpc=client,
                 )
                 with self.assertRaises(HomeAssistantError):
@@ -641,7 +641,7 @@ class TestLocalRpc(IsolatedAsyncioTestCase):
             MagicMock(),
             100,
             "Q800F",
-            control_mode="hybrid_local_smartthings",
+            control_mode="hybrid_local_ocf",
             local_rpc=self.rpc,
         )
         with patch(

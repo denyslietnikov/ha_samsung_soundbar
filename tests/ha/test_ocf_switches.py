@@ -1,7 +1,7 @@
 """Actual HA switches: stable IDs, readback, per-feature availability and no Cloud."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -77,8 +77,6 @@ async def test_existing_switch_ids_and_native_toggles_use_local_readback(
         audio.client.async_write.assert_awaited_with(
             profile.href, {profile.property: int(not old)}, switch_profile=profile
         )
-    transports.auth.assert_not_awaited()
-    transports.api.execute_device_command.assert_not_called()
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert registered(hass, entry) == ids
@@ -185,7 +183,6 @@ async def test_failure_never_wakes_or_falls_back_and_keeps_entities(
     assert registered(hass, entry) == ids
     audio.client.async_write.assert_not_awaited()
     transports.rpc.power_on.assert_not_awaited()
-    transports.auth.assert_not_awaited()
 
 
 async def test_rejected_write_does_not_turn_on_switch_optimistically(
@@ -206,19 +203,6 @@ async def test_rejected_write_does_not_turn_on_switch_optimistically(
     audio.client.async_write.assert_awaited_once()
 
 
-async def test_disabled_cloud_capability_cannot_hide_local_switches(
-    hass, entry, transports, audio
-):
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    device = entry.runtime_data.device
-    device.cloud_feature_disabled = MagicMock(return_value=True)
-    device.coordinator.state.discard_cloud_fields(set(Q800F_AUDIO_SWITCHES))
-    device.coordinator.publish()
-    await hass.async_block_till_done()
-    for profile in Q800F_AUDIO_SWITCHES.values():
-        entity_id = registered(hass, entry)["existing-cloud-id_sw_" + profile.suffix][0]
-        assert hass.states.get(entity_id).state != "unavailable"
 
 
 async def test_forget_and_reimport_credential_preserves_switch_ids(
@@ -238,7 +222,6 @@ async def test_forget_and_reimport_credential_preserves_switch_ids(
     hass.config_entries.async_update_entry(entry, data={**data, "ocf_configured": True})
     await hass.async_block_till_done()
     assert registered(hass, entry) == before
-    transports.auth.assert_not_awaited()
 
 
 async def test_existing_spacefit_action_uses_verified_local_route(
@@ -261,4 +244,3 @@ async def test_existing_spacefit_action_uses_verified_local_route(
     audio.client.async_write.assert_awaited_once_with(
         profile.href, {profile.property: 0}, switch_profile=profile
     )
-    transports.api.execute_device_command.assert_not_called()

@@ -25,18 +25,14 @@ async def async_setup_entry(
         entities.append(
             InputSourceSensor(device, "input_preset", "mdi:video-input-hdmi")
         )
-    if (
-        device.hybrid_mode
-        or device.has_status_capability("samsungvd.soundFrom")
-        or device.has_status_capability("samsungvd.audioSoundFrom")
-    ):
+    if device.local_rpc_enabled:
         entities.append(SoundFromSensor(device, "sound_from", "mdi:speaker"))
     register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
 
 
 class VolumeSensor(SensorEntity):
-    _soundbar_cloud_capabilities = ("audioVolume",)
+    _soundbar_local_only = True
 
     def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):
         self.__device = device
@@ -54,14 +50,12 @@ class VolumeSensor(SensorEntity):
     @property
     def native_value(self) -> int | None:
         """Return the current soundbar volume."""
-        if self.__device.coordinator is not None or self.__device.hybrid_mode:
-            level = self.__device.volume_level
-            return None if level is None else round(level * self.__device.volume_scale)
-        return self.__device.device.status.volume
+        level = self.__device.volume_level
+        return None if level is None else round(level * self.__device.volume_scale)
 
 
 class InputSourceSensor(SensorEntity):
-    _soundbar_cloud_capabilities = ("mediaInputSource", "samsungvd.audioInputSource")
+    _soundbar_local_only = True
 
     def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):
         self.__device = device
@@ -86,7 +80,7 @@ class InputSourceSensor(SensorEntity):
 
 
 class SoundFromSensor(SensorEntity):
-    _soundbar_cloud_capabilities = ("samsungvd.soundFrom", "samsungvd.audioSoundFrom")
+    _soundbar_local_only = True
 
     def __init__(self, device: SoundbarDevice, append_unique_id: str, icon_string: str):
         self.__device = device
@@ -109,7 +103,7 @@ class SoundFromSensor(SensorEntity):
         if self.__device.coordinator is not None:
             await self.__device.coordinator.async_request_refresh()
             return
-        elif self.__device.hybrid_mode:
+        elif self.__device.local_rpc_enabled:
             await self.__device.update_local_input_source()
             return
         await self.__device.update()

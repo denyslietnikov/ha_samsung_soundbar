@@ -17,12 +17,6 @@ _LOGGER = logging.getLogger(__name__)
 _INVALID_RESTORED_STATES = {STATE_UNAVAILABLE, STATE_UNKNOWN, None}
 SCAN_INTERVAL = datetime.timedelta(seconds=2)
 
-SELECT_ENTITY_NAMES = {
-    "eq_preset": "EQ Preset",
-    "sound_mode_preset": "Sound Mode",
-    "input_preset": "Input Preset",
-}
-
 
 def _select_options(options: list[str] | None, current: str | None) -> list[str]:
     """Return select options with the current value included."""
@@ -38,88 +32,34 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     device = config_entry.runtime_data.device
-    entities = []
-    eq_added = False
+    async_sync_eq_entity(hass, config_entry)
+    added = set()
 
-    def discover_eq():
-        nonlocal eq_added
-        async_sync_eq_entity(hass, config_entry, device.can_select_equalizer_preset)
-        if eq_added or not device.can_select_equalizer_preset:
-            return
-        eq_added = True
-        eq_entities = [EqPresetSelectEntity(device, "eq_preset", "mdi:tune-vertical")]
-        register_device_update_listener(config_entry, device, eq_entities)
-        async_add_entities(eq_entities)
+    def discover():
+        entities = []
+        if "sound_mode" not in added and device.can_select_sound_mode:
+            added.add("sound_mode")
+            entities.append(
+                SoundModeSelectEntity(device, "sound_mode_preset", "mdi:surround-sound")
+            )
+        if "input" not in added and device.can_select_source:
+            added.add("input")
+            entities.append(
+                InputSelectEntity(device, "input_preset", "mdi:video-input-hdmi")
+            )
+        if entities:
+            register_device_update_listener(config_entry, device, entities)
+            async_add_entities(entities)
 
-    discover_eq()
-    config_entry.async_on_unload(device.add_update_listener(discover_eq))
-    if device.can_select_sound_mode:
-        entities.append(
-            SoundModeSelectEntity(device, "sound_mode_preset", "mdi:surround-sound")
-        )
-
-    if device.can_select_source:
-        entities.append(
-            InputSelectEntity(device, "input_preset", "mdi:video-input-hdmi")
-        )
-    register_device_update_listener(config_entry, device, entities)
-    async_add_entities(entities)
-
-
-class EqPresetSelectEntity(SelectEntity):
-    _soundbar_eq_preset = True
-    _soundbar_cloud_only = True
-    _soundbar_cloud_capabilities = ("execute",)
-
-    def __init__(
-        self,
-        device: SoundbarDevice,
-        append_unique_id: str,
-        icon_string: str,
-    ):
-        self.entity_description = SelectEntityDescription(
-            key=append_unique_id,
-            translation_key="eq_preset",
-        )
-        if device.ocf_equalizer.profile is not None:
-            self._attr_has_entity_name = True
-        else:
-            self._attr_name = SELECT_ENTITY_NAMES["eq_preset"]
-        self.__base_icon = icon_string
-        self.__device = device
-        self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
-        self._attr_device_info = build_device_info(self.__device)
-        self.__append_unique_id = append_unique_id
-
-    # ---------- GENERAL ---------------
-
-    @property
-    def options(self) -> list[str]:
-        return _select_options(
-            self.__device.supported_equalizer_presets,
-            self.current_option,
-        )
-
-    @property
-    def icon(self) -> str | None:
-        return self.__base_icon
-
-    # ------ STATE FUNCTIONS --------
-
-    @property
-    def current_option(self) -> str | None:
-        """Get the current status of the select entity from device_status."""
-        return self.__device.active_equalizer_preset
-
-    async def async_select_option(self, option: str) -> None:
-        """Set the option."""
-
-        await self.__device.set_equalizer_preset(option)
+    discover()
+    if not added:
+        async_add_entities([])
+    config_entry.async_on_unload(device.add_update_listener(discover))
 
 
 class SoundModeSelectEntity(SelectEntity, RestoreEntity):
+    _soundbar_local_only = True
     _attr_has_entity_name = True
-    _soundbar_cloud_capabilities = ("execute",)
 
     def __init__(
         self,
@@ -169,7 +109,7 @@ class SoundModeSelectEntity(SelectEntity, RestoreEntity):
         """Refresh local sound mode before publishing the select state."""
         if self.__device.coordinator is not None:
             await self.__device.coordinator.async_request_refresh()
-        elif self.__device.hybrid_mode:
+        elif self.__device.local_rpc_enabled:
             await self.__device.update_local_input_source()
 
     async def async_select_option(self, option: str) -> None:
@@ -180,8 +120,8 @@ class SoundModeSelectEntity(SelectEntity, RestoreEntity):
 
 
 class InputSelectEntity(SelectEntity, RestoreEntity):
+    _soundbar_local_only = True
     _attr_has_entity_name = True
-    _soundbar_cloud_capabilities = ("mediaInputSource", "samsungvd.audioInputSource")
 
     def __init__(
         self,
@@ -228,11 +168,11 @@ class InputSelectEntity(SelectEntity, RestoreEntity):
         return self.__device.input_source
 
     async def async_update(self) -> None:
-        """Refresh the input source quickly in hybrid mode."""
+        """Refresh the local input source."""
         if self.__device.coordinator is not None:
             await self.__device.coordinator.async_request_refresh()
             return
-        elif self.__device.hybrid_mode:
+        elif self.__device.local_rpc_enabled:
             await self.__device.update_local_input_source()
             return
         await self.__device.update()

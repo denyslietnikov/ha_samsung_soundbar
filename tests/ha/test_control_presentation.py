@@ -162,62 +162,6 @@ async def test_grouped_native_controls_keep_ids_and_custom_names(
     assert hass.states.get(tone_ids[0]).attributes["friendly_name"] == "My bass"
 
 
-async def test_experimental_local_eq_is_not_a_control_and_old_entry_is_disabled(
-    hass, entry, transports, presentation
-):
-    registry = er.async_get(hass)
-    old = registry.async_get_or_create(
-        "select",
-        DOMAIN,
-        "existing-cloud-id_sw_eq_preset",
-        config_entry=entry,
-        suggested_object_id="old_eq",
-    )
-    registry.async_update_entity(old.entity_id, name="My EQ")
-    hass.config_entries.async_update_entry(
-        entry, options={**entry.options, "settings_eq": True}
-    )
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    item = registry.async_get(old.entity_id)
-    assert item.disabled_by is er.RegistryEntryDisabler.INTEGRATION
-    assert item.name == "My EQ"
-    assert hass.states.get(old.entity_id) is None
-    assert entry.runtime_data.device.ocf_equalizer.profile is not None
-    assert not entry.runtime_data.device.can_select_equalizer_preset
-    assert await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
-    assert (
-        registry.async_get(old.entity_id).disabled_by
-        is er.RegistryEntryDisabler.INTEGRATION
-    )
-
-
-async def test_eq_registry_sync_respects_user_disable_and_only_reenables_owned_entries(
-    hass, entry
-):
-    from custom_components.samsung_soundbar.entity_migrations import (
-        async_sync_eq_entity,
-    )
-
-    registry = er.async_get(hass)
-    item = registry.async_get_or_create(
-        "select", DOMAIN, "existing-cloud-id_sw_eq_preset", config_entry=entry
-    )
-    registry.async_update_entity(
-        item.entity_id, disabled_by=er.RegistryEntryDisabler.USER
-    )
-    async_sync_eq_entity(hass, entry, True)
-    assert (
-        registry.async_get(item.entity_id).disabled_by is er.RegistryEntryDisabler.USER
-    )
-    registry.async_update_entity(
-        item.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
-    )
-    async_sync_eq_entity(hass, entry, True)
-    assert registry.async_get(item.entity_id).disabled_by is None
-
-
 async def test_no_woofer_buttons_when_model_is_discovered_late(hass, entry, transports):
     original = dict(transports.rpc.status.return_value)
     transports.rpc.status.return_value = {**original, "identifier": None}

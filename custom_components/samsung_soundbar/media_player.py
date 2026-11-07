@@ -8,10 +8,8 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api_extension.const import RearSpeakerMode, SpeakerIdentifier
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .device_info import build_device_info
 from .entity_updates import register_device_update_listener
@@ -19,7 +17,7 @@ from .models import SoundbarConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_NAME = "SmartThings Soundbar"
+DEFAULT_NAME = "Samsung Soundbar"
 CONF_MAX_VOLUME = "max_volume"
 
 
@@ -29,14 +27,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     device = config_entry.runtime_data.device
-    entities = [SmartThingsSoundbarMediaPlayer(device, async_get_clientsession(hass))]
+    entities = [SoundbarMediaPlayer(device)]
     register_device_update_listener(config_entry, device, entities)
     async_add_entities(entities)
 
 
-class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
-    def __init__(self, device: SoundbarDevice, session):
-        self.session = session
+class SoundbarMediaPlayer(MediaPlayerEntity):
+    _soundbar_local_only = True
+
+    def __init__(self, device: SoundbarDevice):
         self.device = device
         self._attr_unique_id = f"{self.device.device_id}_mp"
         self._attr_device_class = MediaPlayerDeviceClass.SPEAKER
@@ -59,12 +58,6 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
             features |= MediaPlayerEntityFeature.VOLUME_SET
         if self.device.can_mute_volume:
             features |= MediaPlayerEntityFeature.VOLUME_MUTE
-        if self.device.can_control_playback:
-            features |= MediaPlayerEntityFeature.PAUSE
-            features |= MediaPlayerEntityFeature.PLAY
-            features |= MediaPlayerEntityFeature.STOP
-            features |= MediaPlayerEntityFeature.NEXT_TRACK
-            features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
         if self.device.can_select_source:
             features |= MediaPlayerEntityFeature.SELECT_SOURCE
         if self.device.can_select_sound_mode:
@@ -73,7 +66,7 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
 
     @property
     def name(self):
-        return self.device.device_name
+        return self.device.device_name or DEFAULT_NAME
 
     # ---------- POWER ON/OFF ------------
 
@@ -146,54 +139,6 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
         await self.device.select_sound_mode(sound_mode)
         self.async_write_ha_state()
 
-    # ---------- MEDIA ------------
-    @property
-    def media_title(self):
-        return self.device.media_title
-
-    @property
-    def media_artist(self) -> str | None:
-        return self.device.media_artist
-
-    @property
-    def media_duration(self) -> int | None:
-        return self.device.media_duration
-
-    @property
-    def media_position(self):
-        return self.device.media_position
-
-    @property
-    def media_image_url(self) -> str | None:
-        return self.device.media_coverart_url or None
-
-    @property
-    def media_image_hash(self) -> str | None:
-        return self.device.media_coverart_hash
-
-    @property
-    def media_image_remotely_accessible(self) -> bool | None:
-        return False
-
-    @property
-    def app_name(self) -> str | None:
-        return self.device.media_app_name
-
-    async def async_media_play(self):
-        await self.device.media_play()
-
-    async def async_media_pause(self):
-        await self.device.media_pause()
-
-    async def async_media_next_track(self):
-        await self.device.media_next_track()
-
-    async def async_media_previous_track(self):
-        await self.device.media_previous_track()
-
-    async def async_media_stop(self):
-        await self.device.media_stop()
-
     # ---------- SERVICE_UTILITY ------------
 
     async def async_set_woofer_level(self, level: int):
@@ -208,26 +153,13 @@ class SmartThingsSoundbarMediaPlayer(MediaPlayerEntity):
     async def async_set_night_mode(self, enabled: bool):
         await self.device.set_night_mode(enabled)
 
-    # ---------- SERVICE_UTILITY ------------
-
-    async def async_set_speaker_level(self, speaker_identifier: str, level: int):
-        await self.device.set_speaker_level(
-            SpeakerIdentifier(speaker_identifier), level
-        )
-
-    async def async_set_rear_speaker_mode(self, speaker_mode: str):
-        await self.device.set_rear_speaker_mode(RearSpeakerMode(speaker_mode))
-
-    async def async_set_active_voice_amplifier(self, enabled: bool):
-        await self.device.set_active_voice_amplifier(enabled)
-
     async def async_set_space_fit_sound(self, enabled: bool):
         await self.device.set_space_fit_sound(enabled)
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
         attrs: dict[str, Any] = {"control_mode": self.device.control_mode}
-        if self.device.hybrid_mode:
+        if self.device.local_rpc_enabled:
             attrs.update(
                 {
                     "local_available": self.device.local_available,

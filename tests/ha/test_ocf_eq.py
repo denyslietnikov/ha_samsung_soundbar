@@ -64,7 +64,7 @@ def equalizer(ocf, transports):
     return SimpleNamespace(client=ocf, payloads=payloads, curves=curves)
 
 
-async def test_old_eq_id_is_disabled_while_diagnostic_route_stays_guarded(
+async def test_old_eq_is_removed_while_diagnostic_route_stays_guarded(
     hass, entry, transports, equalizer
 ):
     old = er.async_get(hass).async_get_or_create(
@@ -72,13 +72,9 @@ async def test_old_eq_id_is_disabled_while_diagnostic_route_stays_guarded(
     )
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    entity_id = registered(hass, entry)[UNIQUE][0]
-    assert entity_id == old.entity_id
-    assert (
-        er.async_get(hass).async_get(entity_id).disabled_by
-        is er.RegistryEntryDisabler.INTEGRATION
-    )
-    assert hass.states.get(entity_id) is None
+    assert UNIQUE not in registered(hass, entry)
+    assert er.async_get(hass).async_get(old.entity_id) is None
+    assert hass.states.get(old.entity_id) is None
     assert entry.runtime_data.device.supported_equalizer_presets == OPTIONS
     await entry.runtime_data.device.set_equalizer_preset("POP")
     await hass.async_block_till_done()
@@ -87,8 +83,6 @@ async def test_old_eq_id_is_disabled_while_diagnostic_route_stays_guarded(
     equalizer.client.async_write.assert_awaited_once_with(
         EQ, {P + "EQname": "POP", P + "action": "setEQmode"}, eq_profile=Q800F_EQ
     )
-    transports.auth.assert_not_awaited()
-    transports.api.execute_device_command.assert_not_called()
     before = registered(hass, entry)
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
@@ -143,7 +137,6 @@ async def test_unavailable_context_never_auto_changes_or_falls_back(
     equalizer.client.async_write.assert_not_awaited()
     transports.rpc.power_on.assert_not_awaited()
     transports.rpc.set_sound_mode.assert_not_awaited()
-    transports.api.execute_device_command.assert_not_called()
 
 
 async def test_failed_write_does_not_publish_optimistic_eq(
@@ -171,7 +164,7 @@ async def test_preflight_rechecks_options_and_context_under_queue(
     equalizer.client.async_write.assert_not_awaited()
 
 
-async def test_forget_reimport_preserves_eq_registry_id(
+async def test_forget_reimport_does_not_recreate_removed_eq_select(
     hass, entry, transports, equalizer
 ):
     old = er.async_get(hass).async_get_or_create(
@@ -185,10 +178,7 @@ async def test_forget_reimport_preserves_eq_registry_id(
     hass.config_entries.async_update_entry(entry, data=data)
     await hass.async_block_till_done()
     assert registered(hass, entry) == before
-    assert (
-        er.async_get(hass).async_get(old.entity_id).disabled_by
-        is er.RegistryEntryDisabler.INTEGRATION
-    )
+    assert er.async_get(hass).async_get(old.entity_id) is None
     hass.config_entries.async_update_entry(entry, data={**data, "ocf_configured": True})
     await hass.async_block_till_done()
     assert registered(hass, entry) == before

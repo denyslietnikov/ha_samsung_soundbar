@@ -10,9 +10,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.samsung_soundbar import number
 from custom_components.samsung_soundbar.const import (
-    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
-    CONTROL_MODE_LOCAL_ONLY,
-    CONTROL_MODE_SMARTTHINGS_CLOUD,
+    CONTROL_MODE_HYBRID_LOCAL_OCF,
 )
 from custom_components.samsung_soundbar.entity_updates import (
     register_device_update_listener,
@@ -28,7 +26,7 @@ class TestOcfWoofer(IsolatedAsyncioTestCase):
     setUp = fixtures.TestCoordinator.setUp
     make_device = fixtures.TestCoordinator.make_device
 
-    def prepare(self, mode=CONTROL_MODE_LOCAL_ONLY):
+    def prepare(self, mode=CONTROL_MODE_HYBRID_LOCAL_OCF):
         device, coordinator = self.make_device(mode)
         self.level = -6
         self.connection = "on"
@@ -74,7 +72,6 @@ class TestOcfWoofer(IsolatedAsyncioTestCase):
         self.assertEqual(device.woofer_level, -7)
         self.assertEqual(coordinator.state.resolve("woofer_level").source, "ocf")
         self.assertNotIn("woofer_level", coordinator.state.pending)
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_invalid_values_never_reach_any_transport(self):
         device, coordinator, client = self.prepare()
@@ -86,7 +83,6 @@ class TestOcfWoofer(IsolatedAsyncioTestCase):
             ):
                 await device.set_woofer(value)
         client.async_write.assert_not_awaited()
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_disconnect_or_off_disables_number_without_disabling_rpc(self):
         device, coordinator, client = self.prepare()
@@ -129,7 +125,6 @@ class TestOcfWoofer(IsolatedAsyncioTestCase):
             client.async_write.assert_awaited_once()
             self.assertEqual(device.woofer_level, -6)
         self.rpc.remote_key.assert_not_called()
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_ocf_outage_retains_absolute_route_and_never_uses_cloud(self):
         device, coordinator, client = self.prepare()
@@ -141,7 +136,6 @@ class TestOcfWoofer(IsolatedAsyncioTestCase):
         with self.assertRaises(HomeAssistantError):
             await device.set_woofer(1)
         client.async_write.assert_not_awaited()
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_number_is_discovered_once_after_first_ocf_read(self):
         device, coordinator, _client = self.prepare()
@@ -219,7 +213,6 @@ class TestOcfWoofer(IsolatedAsyncioTestCase):
             await task
         self.assertFalse(entity.available)
         client.async_write.assert_awaited_once()
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_power_changed_while_command_queued_is_checked_before_post(self):
         device, coordinator, client = self.prepare()
@@ -248,52 +241,6 @@ class TestOcfWoofer(IsolatedAsyncioTestCase):
         with self.assertRaises(HomeAssistantError):
             await device.set_woofer(1)
         client.async_write.assert_awaited_once()
-
-    async def _check_queued_legacy_route_transition(self, relative):
-        device, coordinator, client = self.prepare(
-            CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
-        )
-        started, release = asyncio.Event(), asyncio.Event()
-
-        async def read(href):
-            if href == HREF:
-                started.set()
-                await release.wait()
-                return {FIELD: -6, CONNECTION: "on"}
-            return {}
-
-        client.async_read.side_effect = read
-        self.rpc.remote_key = AsyncMock()
-        device.set_custom_execution_data = AsyncMock()
-        await coordinator.async_refresh()
-        await started.wait()
-        self.assertIsNone(device.ocf_woofer_profile)
-        task = asyncio.create_task(
-            device.adjust_local_woofer(True) if relative else device.set_woofer(-7)
-        )
-        await asyncio.sleep(0)
-        release.set()
-        with self.assertRaises(HomeAssistantError):
-            await task
-        self.rpc.remote_key.assert_not_awaited()
-        device.set_custom_execution_data.assert_not_awaited()
-        client.async_write.assert_not_awaited()
-
-    async def test_queued_cloud_write_is_rejected_if_ocf_profile_appears(self):
-        await self._check_queued_legacy_route_transition(False)
-
-    async def test_queued_relative_write_is_rejected_if_ocf_profile_appears(self):
-        await self._check_queued_legacy_route_transition(True)
-
-    async def test_cloud_only_legacy_woofer_route_is_preserved(self):
-        device, coordinator = self.make_device(CONTROL_MODE_SMARTTHINGS_CLOUD)
-        await coordinator.async_refresh_all()
-        device.set_custom_execution_data = AsyncMock()
-        await device.set_woofer(-7)
-        device.set_custom_execution_data.assert_awaited_once_with(
-            href=HREF, property=FIELD, value=-7
-        )
-        self.rpc.status.assert_not_awaited()
 
 
 if __name__ == "__main__":

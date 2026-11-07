@@ -28,7 +28,7 @@ async def async_setup_entry(
     def discover():
         entities = []
         for field, profile in Q800F_AUDIO_SWITCHES.items():
-            if field in added or not device.can_control_audio_switch(field):
+            if field in added or device.ocf_audio_profile(field) is None:
                 continue
             added.add(field)
             entities.append(
@@ -53,9 +53,6 @@ async def async_setup_entry(
 
 
 class SoundbarSwitchAdvancedAudio(SwitchEntity):
-    _soundbar_cloud_only = True
-    _soundbar_cloud_capabilities = ("execute",)
-
     def __init__(
         self,
         device: SoundbarDevice,
@@ -87,15 +84,10 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
         self._attr_device_info = build_device_info(self.__device)
 
         self.__state_function = state_function
-        self.__state = False
         self.__on_function = on_function
         self.__off_function = off_function
 
     # ---------- GENERAL ---------------
-
-    async def async_update(self):
-        if self.__device.has_advanced_audio_state:
-            self.__state = self.__state_function()
 
     @property
     def icon(self) -> str | None:
@@ -104,13 +96,8 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
     # ------ STATE FUNCTIONS --------
     @property
     def is_on(self) -> bool | None:
-        if (
-            self.__device.coordinator is not None
-            or self.__device.has_advanced_audio_state
-        ):
-            value = self.__state_function()
-            return None if value is None else bool(value)
-        return bool(self.__state)
+        value = self.__state_function()
+        return None if value is None else bool(value)
 
     async def async_turn_off(self):
         await self.__off_function(False)
@@ -119,5 +106,4 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
 
     async def async_turn_on(self):
         await self.__on_function(True)
-        self.__state = True
         self.async_write_ha_state()

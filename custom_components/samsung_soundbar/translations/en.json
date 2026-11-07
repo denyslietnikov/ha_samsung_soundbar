@@ -1,9 +1,17 @@
 {
     "exceptions": {
-        "ocf_eq_invalid": {"message": "Choose a supported EQ preset using its exact name."},
-        "ocf_eq_unavailable": {"message": "Local EQ is unavailable. Use Standard sound mode with Bass Boost off, and check power and OCF readback."},
-        "ocf_eq_unconfirmed": {"message": "The local EQ change was not confirmed. No retry or Cloud fallback was attempted."},
-        "ocf_eq_route_changed": {"message": "The EQ route changed while queued. Retry using the local EQ control."},
+        "ocf_eq_invalid": {
+            "message": "Choose a supported EQ preset using its exact name."
+        },
+        "ocf_eq_unavailable": {
+            "message": "Local EQ is unavailable. Use Standard sound mode with Bass Boost off, and check power and OCF readback."
+        },
+        "ocf_eq_unconfirmed": {
+            "message": "The local EQ change was not confirmed. No retry or fallback was attempted."
+        },
+        "ocf_eq_route_changed": {
+            "message": "The EQ route changed while queued. Retry using the local EQ control."
+        },
         "ocf_tone_invalid": {
             "message": "Bass and Treble levels must be integers between -6 and 6."
         },
@@ -11,25 +19,42 @@
             "message": "Local tone control is unavailable. Check soundbar power and OCF readback."
         },
         "ocf_tone_unconfirmed": {
-            "message": "The local tone change was not confirmed. No retry or Cloud fallback was attempted."
+            "message": "The local tone change was not confirmed. No retry or fallback was attempted."
         }
     },
     "entity": {
         "select": {
-            "eq_preset": {"name": "EQ Preset"},
-            "sound_mode_preset": {"name": "Sound: Mode"},
-            "input_preset": {"name": "Source: Input"}
+            "sound_mode_preset": {
+                "name": "Sound: Mode"
+            },
+            "input_preset": {
+                "name": "Source: Input"
+            }
         },
         "number": {
-            "bass_level": {"name": "Tone: Bass"},
-            "treble_level": {"name": "Tone: Treble"},
-            "woofer_level": {"name": "Tone: Woofer"}
+            "bass_level": {
+                "name": "Tone: Bass"
+            },
+            "treble_level": {
+                "name": "Tone: Treble"
+            },
+            "woofer_level": {
+                "name": "Tone: Woofer"
+            }
         },
         "switch": {
-            "bass_mode": {"name": "Sound: Bass Boost"},
-            "night_mode": {"name": "Sound: Night Mode"},
-            "voice_amplifier": {"name": "Sound: Voice Amplifier"},
-            "virtual_sound": {"name": "Sound: Virtual"},
+            "bass_mode": {
+                "name": "Sound: Bass Boost"
+            },
+            "night_mode": {
+                "name": "Sound: Night Mode"
+            },
+            "voice_amplifier": {
+                "name": "Sound: Voice Amplifier"
+            },
+            "virtual_sound": {
+                "name": "Sound: Virtual"
+            },
             "moderate_bass": {
                 "name": "Sound: Moderate Bass"
             },
@@ -45,116 +70,54 @@
                 "step": {
                     "choose": {
                         "title": "Restore local OCF access",
-                        "description": "The local OCF credential for {name} is missing, invalid or no longer authorized. Import your saved credential in the existing entry options. If local storage is damaged, back up the credential first, then use Forget local OCF credential and import again. This does not require Samsung OAuth reauthentication. Working RPC and Cloud controls are unaffected."
+                        "description": "The local OCF credential for {name} is missing, invalid or no longer authorized. Import your saved credential in the existing entry options. If local storage is damaged, back up the credential before using Forget and importing again. Working RPC controls are unaffected."
                     }
                 },
                 "abort": {
-                    "reconfigure": "Continue in the local credential import form."
+                    "reconfigure": "Continue in the local credential import form.",
+                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the existing entry from Settings > Devices & services."
                 }
             }
         },
-        "cloud_auth": {
-            "title": "SmartThings authorization needs attention",
+        "ocf_missing_credential": {
+            "title": "Hybrid needs a local OCF credential",
             "fix_flow": {
                 "step": {
                     "choose": {
-                        "title": "Choose how to resolve the Cloud issue",
-                        "description": "SmartThings authorization for {name} is missing, expired or revoked. Reconnect the account, or switch this existing entry to Local only. In Hybrid, reachable LAN controls continue to work; cloud-only controls are unavailable.\n\nFor {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
-                        "data": {
-                            "action": "Action"
-                        }
+                        "title": "Import local OCF credential",
+                        "description": "Hybrid Local + OCF is selected for {name}, but no local OCF credential is saved. RPC controls remain available; OCF audio settings are not connected yet. Import your saved credential in this entry's options, or select Local only (RPC)."
                     }
                 },
                 "abort": {
-                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
-                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
+                    "reconfigure": "Continue in the local credential import form.",
+                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the existing entry from Settings > Devices & services."
                 }
             }
         },
-        "cloud_access": {
-            "title": "SmartThings Cloud denied access",
+        "local_configuration": {
+            "title": "Local soundbar configuration required",
             "fix_flow": {
                 "step": {
                     "choose": {
-                        "title": "Choose how to resolve the Cloud issue",
-                        "description": "SmartThings denied API access for {name} (HTTP 403). Check the app permissions and device access. This response alone does not prove that a paid subscription is required. Reauth is not started automatically. You can switch this existing entry to Local only.\n\nFor {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
-                        "data": {
-                            "action": "Action"
-                        }
+                        "title": "Configure local connection",
+                        "description": "No verified local host is saved for {name}. Open local reconfiguration for this existing entry and confirm its host and device identity. Device and entity IDs are retained; do not remove the entry."
                     }
                 },
                 "abort": {
-                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
-                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
-                }
-            }
-        },
-        "cloud_payment": {
-            "title": "SmartThings Cloud requires payment",
-            "fix_flow": {
-                "step": {
-                    "choose": {
-                        "title": "Choose how to resolve the Cloud issue",
-                        "description": "SmartThings returned HTTP 402 for {name}. Check the API plan for your account, or switch this existing entry to Local only. OAuth reauthentication will not resolve this response. Reachable LAN controls in Hybrid remain available.\n\nFor {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
-                        "data": {
-                            "action": "Action"
-                        }
-                    }
-                },
-                "abort": {
-                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
-                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
-                }
-            }
-        },
-        "cloud_limit": {
-            "title": "SmartThings Cloud request limit reached",
-            "fix_flow": {
-                "step": {
-                    "choose": {
-                        "title": "Choose how to resolve the Cloud issue",
-                        "description": "SmartThings returned HTTP 429 for {name}. Cloud polling pauses before retrying; this may be a rate limit or a quota, not necessarily a billing requirement. You can keep Hybrid while it recovers, or switch to Local only. Reachable LAN controls remain available.\n\nFor {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
-                        "data": {
-                            "action": "Action"
-                        }
-                    }
-                },
-                "abort": {
-                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
-                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
-                }
-            }
-        },
-        "cloud_unavailable": {
-            "title": "SmartThings Cloud is temporarily unavailable",
-            "fix_flow": {
-                "step": {
-                    "choose": {
-                        "title": "Choose how to resolve the Cloud issue",
-                        "description": "Cloud requests for {name} have failed repeatedly. Home Assistant will retry. Check the internet connection or wait for SmartThings to recover; reauthentication is not required for a temporary outage. You can switch this existing entry to Local only. Reachable LAN controls in Hybrid remain available.\n\nFor {name}, open the existing entry options to change control mode, or reconnect the account when authorization is invalid. Local-only setup verifies the soundbar host and identity before saving; device and entity IDs are preserved.",
-                        "data": {
-                            "action": "Action"
-                        }
-                    }
-                },
-                "abort": {
-                    "reconfigure": "Continue in the selected configuration flow. The issue remains until Cloud recovers or Local only is saved.",
-                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the integration options from Settings > Devices & services."
+                    "reconfigure": "Continue in local reconfiguration for this existing entry.",
+                    "repair_flow_unavailable": "The configuration flow could not be opened. Open the existing entry from Settings > Devices & services."
                 }
             }
         }
     },
-    "application_credentials": {
-        "description": "Create a SmartThings OAuth-In App with the SmartThings CLI. Add this redirect URI exactly: `{redirect_uri}`. Use scopes `r:devices:*`, `x:devices:*`, and `r:locations:*`. Do not add `sse`: SmartThings does not expose it to user-created OAuth-In apps. Then enter the generated client ID and client secret here. [SmartThings CLI documentation]({console_url})"
-    },
     "config": {
         "step": {
             "user": {
+                "title": "Choose control mode",
+                "description": "Connect the soundbar over local RPC. Hybrid adds verified OCF audio settings using a separately imported credential.",
                 "data": {
                     "control_mode": "Control mode"
-                },
-                "description": "Choose Local only for setup without a Samsung account, or a SmartThings mode for OAuth setup.",
-                "title": "Choose control mode"
+                }
             },
             "local": {
                 "data": {
@@ -167,33 +130,27 @@
                 "description": "Enable IP Control on the soundbar. Home Assistant checks the local RPC connection and stable device identity before adding it.",
                 "title": "Connect local soundbar"
             },
-            "device": {
+            "reconfigure": {
+                "title": "Configure local soundbar",
+                "description": "Save a verified local host for this existing entry. Device and entity IDs are retained.",
                 "data": {
-                    "device_id": "Soundbar",
-                    "device_name": "Device Name"
-                },
-                "description": "Select the SmartThings soundbar to add to Home Assistant.",
-                "title": "Select soundbar"
+                    "control_mode": "Control mode",
+                    "local_host": "Local soundbar host/IP",
+                    "local_port": "Local RPC port",
+                    "local_verify_ssl": "Verify local SSL certificate",
+                    "local_timeout": "Local RPC timeout"
+                }
             },
-            "reauth_confirm": {
-                "description": "Reconnect SmartThings with OAuth. This is required when the refresh token was revoked, expired, or the legacy Personal Access Token entry needs to be replaced.",
-                "title": "Reauthenticate SmartThings"
-            },
-            "reconfigure_confirm": {
-                "data": {
-                    "settings_advanced_audio": "Enable optional Cloud Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier, Virtual)",
-                    "settings_eq": "Enable Cloud EQ selector (supported models)",
-                    "settings_soundmode": "Enable 'Soundmode selector' capabilities",
-                    "settings_woofer": "Enable optional Cloud Woofer number entity",
-                    "device_volume": "Max Volume (int)"
-                },
-                "description": "Some soundbars have a different featureset than others. Please the features supported by your soundbar (visible in the SmartThings App).",
-                "title": "Device Settings"
+            "confirm_local_identity": {
+                "title": "Confirm local soundbar",
+                "description": "Connect this existing device at {host}? Local identifier: {identity}. Existing device and entity IDs are retained."
             }
         },
         "error": {
             "local_cannot_connect": "Could not connect to the soundbar's local RPC API. Check IP Control, host, port, and network.",
-            "identity_unavailable": "No stable local identity was found on ports 8001 or 9110."
+            "identity_unavailable": "No stable local identity was found on ports 8001 or 9110.",
+            "identity_mismatch": "This host belongs to a different soundbar. The existing Home Assistant device was not changed.",
+            "required": "This field is required for the selected control mode."
         },
         "abort": {
             "dhcp_not_configured": "No configured local soundbar matches this DHCP device.",
@@ -201,17 +158,10 @@
             "dhcp_identity_unavailable": "The local address was not changed because device identity could not be verified.",
             "dhcp_identity_mismatch": "The discovered address belongs to a different device. The soundbar settings were not changed.",
             "dhcp_configuration_changed": "The soundbar configuration changed during discovery. The address was not updated.",
-            "cannot_connect": "Could not connect to SmartThings. Try again later.",
-            "invalid_auth": "SmartThings authorization failed.",
-            "missing_configuration": "SmartThings application credentials are not configured.",
-            "missing_credentials": "SmartThings application credentials are missing.",
-            "missing_scopes": "SmartThings did not grant all required scopes.",
-            "no_devices": "No SmartThings devices were returned for this account.",
-            "oauth_error": "SmartThings OAuth flow did not return valid data.",
             "invalid_control_mode": "Unsupported control mode.",
-            "reauth_account_mismatch": "The selected SmartThings account does not match this soundbar entry.",
-            "reauth_device_unavailable": "This SmartThings account cannot access the configured soundbar.",
-            "reauth_successful": "SmartThings has been reauthenticated."
+            "already_configured": "This soundbar is already configured.",
+            "local_host_required": "Open the existing entry's options and save a verified local host.",
+            "reconfigure_successful": "The local soundbar configuration was updated."
         }
     },
     "options": {
@@ -220,27 +170,28 @@
             "ocf_storage": "Credential storage could not be verified. Back up your credential before using Forget and importing again.",
             "ocf_auth": "The credential did not authenticate the configured soundbar. The previous credential was not replaced.",
             "ocf_connect": "Could not verify local OCF access. Check soundbar power and LAN connectivity.",
-            "ocf_local_required": "Save Local only or Hybrid mode with a working local host before importing an OCF credential.",
+            "ocf_local_required": "Save a working local host before importing an OCF credential.",
             "cannot_connect": "Could not connect to the local soundbar RPC API. Check the IP address, port, network, and IP Control setting.",
             "identity_unavailable": "Could not read a stable local device identity. Check access to ports 8001 or 9110.",
             "identity_mismatch": "This host belongs to a different soundbar. The existing Home Assistant device was not changed.",
-            "required": "This field is required for the selected control mode."
+            "required": "This field is required for the selected control mode.",
+            "local_cannot_connect": "Could not connect to the soundbar's local RPC API. Check IP Control, host, port, and network."
         },
         "step": {
             "confirm_local_identity": {
                 "title": "Confirm local soundbar",
-                "description": "Switch this existing device to local control at {host}? Local identifier: {identity}. SmartThings authorization will be removed and must be completed again to return to a cloud mode."
+                "description": "Connect this existing device at {host}? Local identifier: {identity}. Existing device and entity IDs are retained."
             },
             "ocf_import": {
                 "title": "Import local OCF credential",
-                "description": "Paste the complete contents of your q800f.ocf-credential.json backup. The soundbar identity and credential are verified before saving. Local storage uses restricted file permissions, not encryption. Keep an encrypted external backup; never send the credential to support.",
+                "description": "Paste the complete contents of your q800f.ocf-credential.json backup. The soundbar identity and credential are verified before saving. Local storage uses restricted file permissions, not encryption. Keep an encrypted external backup; never send the credential to support. A successful import selects Hybrid Local + OCF for this entry.",
                 "data": {
                     "credential_bundle": "Credential JSON"
                 }
             },
             "ocf_forget": {
                 "title": "Forget local OCF credential",
-                "description": "Delete only this entry's local OCF credential? Reimport requires your saved backup. This does not reset the soundbar or revoke its key. RPC settings and SmartThings authorization remain unchanged.",
+                "description": "Delete only this entry's local OCF credential? Reimport requires your saved backup. This does not reset the soundbar or revoke its key. RPC settings remain unchanged.",
                 "data": {
                     "confirm": "Delete this entry's local OCF credential"
                 }
@@ -252,31 +203,26 @@
                     "local_port": "Local RPC port",
                     "local_verify_ssl": "Verify local SSL certificate",
                     "local_timeout": "Local RPC timeout",
-                    "local_fallback_to_cloud": "Fallback to SmartThings Cloud when local RPC fails",
-                    "settings_advanced_audio": "Enable optional Cloud Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier, Virtual)",
-                    "settings_eq": "Enable Cloud EQ selector (supported models)",
-                    "settings_soundmode": "Enable Sound Mode selector",
-                    "settings_woofer": "Enable optional Cloud Woofer number entity",
                     "device_volume": "Maximum volume",
                     "ocf_action": "Local OCF credential (other changes are not saved for import/forget)"
                 },
-                "description": "Choose which optional Samsung Soundbar features Home Assistant should expose. Unsupported features may be unavailable on some models.",
+                "description": "RPC is active in both modes. Only Hybrid Local + OCF uses a saved OCF credential. Audio settings appear only after validated local readback.",
                 "title": "Samsung Soundbar options"
             }
         }
     },
     "selector": {
+        "control_mode": {
+            "options": {
+                "local_only": "Local only (RPC)",
+                "hybrid_local_ocf": "Hybrid Local + OCF"
+            }
+        },
         "ocf_action": {
             "options": {
                 "keep": "Keep current credential",
                 "import": "Import or replace credential",
                 "forget": "Forget local credential"
-            }
-        },
-        "cloud_repair_action": {
-            "options": {
-                "options": "Open control mode options",
-                "reauth": "Reconnect SmartThings account"
             }
         }
     },
@@ -325,40 +271,6 @@
                 }
             }
         },
-        "set_speaker_level": {
-            "name": "Change Speaker Level",
-            "description": "Change the volume of individual speakers.",
-            "fields":{
-                "speaker_identifier": {
-                    "name": "Speaker Identifier",
-                    "description": "Identifier of the speaker."
-                },
-                "level": {
-                    "name": "Level",
-                    "description": "Level of the Speaker from -6 to 6."
-                }
-            }
-        },
-        "set_rear_speaker_mode": {
-            "name": "Set Rear Speaker Mode",
-            "description": "Use your rear speakers as 'Front' or 'Rear' speakers.",
-            "fields":{
-                "speaker_mode": {
-                    "name": "Speaker mode",
-                    "description": "Weather the speaker are used as rear / front speakers."
-                }
-            }
-        },
-        "set_active_voice_amplifier": {
-            "name": "Set Voice Amplifier",
-            "description": "Turn 'Voice Amplifier' on/off.",
-            "fields": {
-                "enabled": {
-                    "name": "On/Off",
-                    "description": "See name."
-                }
-            }
-        },
         "set_space_fit_sound": {
             "name": "Set SpaceFitSound",
             "description": "Turn 'SpaceFitSound' on/off.",
@@ -369,73 +281,16 @@
                 }
             }
         },
-        "dump_execute_payload": {
-            "name": "Dump execute payload",
-            "description": "Request SmartThings execute hrefs and return the raw payload for diagnostics.",
-            "fields": {
-                "device_id": {
-                    "name": "Device",
-                    "description": "Samsung Soundbar device. Required only when multiple soundbars are loaded."
-                },
-                "preset": {
-                    "name": "Preset",
-                    "description": "Known SmartThings execute href group to dump. Ignored when href is provided."
-                },
-                "href": {
-                    "name": "Href",
-                    "description": "Custom execute href, for example /sec/networkaudio/advancedaudio."
-                },
-                "write_property": {
-                    "name": "Write probe property",
-                    "description": "Optional explicit write probe property. Requires href and write_value. This may change the soundbar setting."
-                },
-                "write_value": {
-                    "name": "Write probe value",
-                    "description": "Optional explicit write probe value. Used only with write_property and href. This may change the soundbar setting."
-                }
-            }
-        },
-        "dump_status_summary": {
-            "name": "Dump status summary",
-            "description": "Return a compact SmartThings status capability summary for diagnostics.",
-            "fields": {
-                "device_id": {
-                    "name": "Device",
-                    "description": "Samsung Soundbar device. Required only when multiple soundbars are loaded."
-                },
-                "include_null": {
-                    "name": "Include null values",
-                    "description": "Include capabilities and attributes whose value is null."
-                }
-            }
-        },
         "dump_discovery_snapshot": {
-            "name": "Dump discovery snapshot",
-            "description": "Return a raw and flattened SmartThings status snapshot for before/after feature discovery.",
+            "name": "Dump local discovery snapshot",
+            "description": "Return projected local RPC and OCF values, freshness and pending writes, without credentials or raw responses.",
             "fields": {
                 "device_id": {
                     "name": "Device",
-                    "description": "Samsung Soundbar device. Required only when multiple soundbars are loaded."
+                    "description": "Required only when multiple soundbars are loaded."
                 },
                 "include_null": {
-                    "name": "Include null values",
-                    "description": "Include capabilities and attributes whose value is null."
-                },
-                "include_raw_status": {
-                    "name": "Include raw status",
-                    "description": "Include the complete raw /status response. This can be large."
-                },
-                "include_flattened_status": {
-                    "name": "Include flattened status",
-                    "description": "Include dot-path status values that are easier to compare before and after changing a setting."
-                },
-                "include_execute_status": {
-                    "name": "Include execute status",
-                    "description": "Include the raw execute capability status and extracted execute payload."
-                },
-                "execute_hrefs": {
-                    "name": "Execute hrefs",
-                    "description": "Optional hidden execute hrefs to request during the snapshot. Leave empty for a non-mutating status-only snapshot."
+                    "name": "Include unknown values"
                 }
             }
         }

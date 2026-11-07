@@ -55,7 +55,7 @@ async def import_test_bundle(hass, entry, content=None):
     )
 
 
-@pytest.mark.parametrize("mode", ("local_only", "hybrid_local_smartthings"))
+@pytest.mark.parametrize("mode", ("local_only", "hybrid_local_ocf"))
 @pytest.mark.parametrize("binding", ("missing", "empty"))
 async def test_first_import_establishes_missing_legacy_identity_only_after_auth(
     hass, entry, transports, store, mode, binding
@@ -84,13 +84,12 @@ async def test_first_import_establishes_missing_legacy_identity_only_after_auth(
         result = await import_test_bundle(hass, entry)
     assert result["type"] == "create_entry"
     assert entry.options["local_identity"] == expected
-    assert entry.options["control_mode"] == mode
+    assert entry.options["control_mode"] == "hybrid_local_ocf"
     assert entry.data["ocf_configured"] is True
     assert (entry.entry_id, entry.unique_id) == (entry_id, unique_id)
     assert (await store.async_load()).psk == PSK
     client.async_validate_candidate.assert_awaited_once()
     client.async_close.assert_awaited_once()
-    transports.auth.assert_not_awaited()
 
 
 async def test_import_missing_identity_auth_failure_never_creates_binding(
@@ -234,20 +233,24 @@ async def test_missing_identity_import_rejects_concurrent_binding_change(
     assert await store.async_load() is None
 
 
-async def test_loaded_legacy_entry_keeps_entity_ids_after_first_identity_import(
+async def test_unbound_legacy_entry_keeps_entity_ids_after_first_identity_import(
     hass, entry, transports, store
 ):
     from .test_lifecycle import registered
 
     expected = dict(entry.options["local_identity"])
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    before = registered(hass, entry)
+    assert await hass.config_entries.async_unload(entry.entry_id)
     options = dict(entry.options)
     options.pop("local_identity")
     hass.config_entries.async_update_entry(entry, options=options)
     transports.rpc.power_on = AsyncMock()
     transports.rpc.power_off = AsyncMock()
-    assert await hass.config_entries.async_setup(entry.entry_id)
+    assert not await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    before = registered(hass, entry)
+    assert registered(hass, entry) == before
     client = MagicMock()
     client.async_validate_candidate = AsyncMock()
     client.async_close = AsyncMock()
@@ -264,7 +267,6 @@ async def test_loaded_legacy_entry_keeps_entity_ids_after_first_identity_import(
     assert (await store.async_load()).psk == PSK
     transports.rpc.power_on.assert_not_awaited()
     transports.rpc.power_off.assert_not_awaited()
-    transports.auth.assert_not_awaited()
 
 
 @pytest.fixture
@@ -354,7 +356,6 @@ async def test_options_import_has_no_secret_defaults_and_no_cloud(
     assert "ocf_action" not in result["data"]
     client.async_validate_candidate.assert_awaited_once()
     client.async_close.assert_awaited_once()
-    transports.auth.assert_not_awaited()
 
 
 async def test_failed_import_keeps_previous_store_and_never_echoes_input(
@@ -434,7 +435,6 @@ async def test_runtime_has_lazy_ocf_without_changing_rpc_entities(
     assert entry.runtime_data.device.volume_level == 0.08
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert await store.async_load() is not None
-    transports.auth.assert_not_awaited()
 
 
 async def test_corrupt_store_does_not_stop_rpc_and_offers_local_repair(
@@ -454,7 +454,6 @@ async def test_corrupt_store_does_not_stop_rpc_and_offers_local_repair(
     )
     assert issue is not None
     assert "psk" not in repr(issue.data)
-    transports.auth.assert_not_awaited()
 
 
 async def test_entry_removal_cleans_only_its_credential(hass, entry, store):
@@ -569,27 +568,6 @@ async def test_ocf_repair_opens_import_not_oauth(hass, entry, transports, store)
     result = await manager.async_configure(result["flow_id"], {})
     assert result.get("reason") == "reconfigure", repr(result)
     assert result["next_flow"][0] is FlowType.OPTIONS_FLOW
-    transports.auth.assert_not_awaited()
-
-
-async def test_ocf_health_never_changes_cloud_issues(hass, entry):
-    from homeassistant.helpers import issue_registry as ir
-
-    from custom_components.samsung_soundbar.ocf_repairs import update_ocf_issue
-
-    registry = ir.async_get(hass)
-    ir.async_create_issue(
-        hass,
-        DOMAIN,
-        "cloud_existing",
-        is_fixable=False,
-        severity=ir.IssueSeverity.WARNING,
-        translation_key="cloud_access",
-    )
-    update_ocf_issue(hass, entry, "auth")
-    update_ocf_issue(hass, entry, None)
-    assert registry.async_get_issue(DOMAIN, "cloud_existing") is not None
-    assert registry.async_get_issue(DOMAIN, f"ocf_credential_{entry.entry_id}") is None
 
 
 async def test_removed_entry_cannot_recreate_an_orphan_credential(hass, entry, store):
@@ -702,27 +680,6 @@ async def test_abort_during_validation_never_saves(hass, entry, transports, stor
             pass
     assert await store.async_load() is None
     assert "ocf_configured" not in entry.data
-
-
-async def test_reauth_retains_ocf_binding(hass, entry, transports, store):
-    from custom_components.samsung_soundbar.config_flow import SamsungSoundbarConfigFlow
-    from custom_components.samsung_soundbar.ocf_credentials import (
-        parse_credential_bundle,
-    )
-
-    await store.async_save(parse_credential_bundle(bundle()))
-    hass.config_entries.async_update_entry(
-        entry, data={**entry.data, "ocf_configured": True}
-    )
-    flow = SamsungSoundbarConfigFlow()
-    flow.hass = hass
-    flow.context = {"source": "reauth", "entry_id": entry.entry_id}
-    flow._devices = {entry.data["device_id"]: entry.title}
-    flow._device_locations = {entry.data["device_id"]: "test-location"}
-    with patch.object(hass.config_entries, "async_reload", new=AsyncMock()):
-        await flow._async_finish_reauth({"token": {"access_token": "synthetic"}})
-    assert entry.data.get("ocf_configured") is True
-    assert await store.async_load() is not None
 
 
 async def test_interrupted_transaction_recovers_previous_private_key(store):

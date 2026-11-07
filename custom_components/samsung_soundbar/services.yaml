@@ -95,79 +95,6 @@ set_voice_enhancer:
       selector:
         boolean:
 
-set_speaker_level:
-  name: Set Speaker level
-  description: Set the speaker levels of your soundbar
-  target:
-    entity:
-      integration: samsung_soundbar
-      domain: media_player
-  fields:
-    speaker_identifier:
-      name: Speaker Identifier
-      required: true
-      example: Spk_Center
-      selector:
-        select:
-          options:
-            - value: Spk_Center
-              label: Center
-            - value: Spk_Side
-              label: Side
-            - value: Spk_Wide
-              label: Wide
-            - value: Spk_Front_Top
-              label: Front Top
-            - value: Spk_Rear
-              label: Rear
-            - value: Spk_Rear_Top
-              label: Rear Top
-    level:
-      name: Speaker Level
-      required: true
-      example: 0
-      selector:
-        number:
-          min: -6
-          max: 6
-          step: 1
-
-set_rear_speaker_mode:
-  name: Set rear speaker mode
-  description: Set the rear speaker mode of your soundbar
-  target:
-    entity:
-      integration: samsung_soundbar
-      domain: media_player
-  fields:
-    speaker_mode:
-      name: Speaker mode
-      required: true
-      example: Rear
-      selector:
-        select:
-          options:
-            - value: Rear
-              label: Rear
-            - value: Front
-              label: Front
-
-set_active_voice_amplifier:
-  name: Set active voice amplifier
-  description: Activates / deactivates the active voice amplifier
-  target:
-    entity:
-      integration: samsung_soundbar
-      domain: media_player
-  fields:
-    enabled:
-      name: Enabled / Disabled
-      required: true
-      example: true
-      default: false
-      selector:
-        boolean:
-
 set_space_fit_sound:
   name: Set SpaceFitSound
   description: Activates / deactivates the SpaceFitSound
@@ -180,81 +107,6 @@ set_space_fit_sound:
       name: Enabled / Disabled
       required: true
       example: true
-      default: false
-      selector:
-        boolean:
-
-dump_execute_payload:
-  name: Dump execute payload
-  description: Request SmartThings execute hrefs and return the raw payload for diagnostics.
-  fields:
-    device_id:
-      name: Device
-      description: Samsung Soundbar device. Required only when multiple soundbars are loaded.
-      required: false
-      selector:
-        device:
-          integration: samsung_soundbar
-    preset:
-      name: Preset
-      description: Known SmartThings execute href group to dump. Ignored when href is provided.
-      required: false
-      default: all
-      selector:
-        select:
-          options:
-            - all
-            - q800f_ui
-            - advancedaudio
-            - spacefitSound
-            - activeVoiceAmplifier
-            - channelVolume
-            - surroundspeaker
-            - eq
-            - soundmode
-            - woofer
-            - sync
-            - virtual
-            - moderateBass
-            - soundGrouping
-            - privateRear
-    href:
-      name: Href
-      description: Custom execute href, for example /sec/networkaudio/advancedaudio.
-      required: false
-      example: /sec/networkaudio/advancedaudio
-      selector:
-        text:
-    write_property:
-      name: Write probe property
-      description: Optional explicit write probe property. Requires href and write_value. This may change the soundbar setting.
-      required: false
-      example: x.com.samsung.networkaudio.spacefitSound
-      selector:
-        text:
-    write_value:
-      name: Write probe value
-      description: Optional explicit write probe value. Used only with write_property and href. This may change the soundbar setting.
-      required: false
-      example: 1
-      selector:
-        object:
-
-dump_status_summary:
-  name: Dump status summary
-  description: Return a compact SmartThings status capability summary for diagnostics.
-  fields:
-    device_id:
-      name: Device
-      description: Samsung Soundbar device. Required only when multiple soundbars are loaded.
-      required: false
-      selector:
-        device:
-          integration: samsung_soundbar
-    include_null:
-      name: Include null values
-      description: Include capabilities and attributes whose value is null.
-      required: false
       default: false
       selector:
         boolean:
@@ -285,68 +137,24 @@ dump_ocf_status:
             - /sec/networkaudio/audiosync
 
 dump_discovery_snapshot:
-  name: Dump discovery snapshot
-  description: Return a raw and flattened SmartThings status snapshot for before/after feature discovery.
+  name: Dump local discovery snapshot
+  description: Return projected local RPC and OCF state, field freshness and pending writes. Never returns credentials or remote status payloads.
   fields:
     device_id:
       name: Device
       description: Samsung Soundbar device. Required only when multiple soundbars are loaded.
-      required: false
       selector:
         device:
           integration: samsung_soundbar
     include_null:
-      name: Include null values
-      description: Include capabilities and attributes whose value is null.
-      required: false
+      name: Include unknown values
       default: true
       selector:
         boolean:
-    include_raw_status:
-      name: Include raw status
-      description: Include the complete raw /status response. This can be large.
-      required: false
-      default: false
-      selector:
-        boolean:
-    include_flattened_status:
-      name: Include flattened status
-      description: Include dot-path status values that are easier to compare before and after changing a setting.
-      required: false
-      default: true
-      selector:
-        boolean:
-    include_execute_status:
-      name: Include execute status
-      description: Include the raw execute capability status and extracted execute payload.
-      required: false
-      default: true
-      selector:
-        boolean:
-    execute_hrefs:
-      name: Execute hrefs
-      description: Optional hidden execute hrefs to request during the snapshot. Leave empty for a non-mutating status-only snapshot.
-      required: false
-      selector:
-        select:
-          multiple: true
-          custom_value: true
-          options:
-            - /sec/networkaudio/advancedaudio
-            - /sec/networkaudio/soundmode
-            - /sec/networkaudio/eq
-            - /sec/networkaudio/spacefitSound
-            - /sec/networkaudio/activeVoiceAmplifier
-            - /sec/networkaudio/woofer
-            - /sec/networkaudio/channelVolume
-            - /sec/networkaudio/surroundspeaker
-            - /sec/networkaudio/moderateBass
-            - /sec/networkaudio/virtual
-            - /sec/networkaudio/sync
 
 dump_local_rpc:
   name: Dump local RPC
-  description: Probe the soundbar local JSON-RPC API over LAN. Requires the soundbar IP address and IP Control enabled in SmartThings.
+  description: Probe the soundbar local JSON-RPC API over LAN. Requires the soundbar IP address and IP Control enabled.
   fields:
     host:
       name: Host

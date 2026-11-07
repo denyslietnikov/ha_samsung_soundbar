@@ -4,4 +4,4 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-pip install rich pysmartthings
+python -m pip install -r requirements-test.txt

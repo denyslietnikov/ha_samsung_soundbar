@@ -65,7 +65,6 @@ async def test_polling_and_read_only_diagnostics_share_entry_transport(
     assert response["values"]["woofer_level"] == 1
     assert "PRIVATE" not in repr(response)
     ocf.async_write.assert_not_called()
-    transports.auth.assert_not_awaited()
     await hass.config_entries.async_unload(entry.entry_id)
     ocf.async_close.assert_awaited_once()
 
@@ -74,9 +73,11 @@ async def test_ocf_session_closes_on_home_assistant_stop(hass, entry, transports
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     coordinator = entry.runtime_data.coordinator
+    poll = coordinator._ocf_task
     await hass.async_stop(force=True)
     assert coordinator._shutdown_requested
-    assert coordinator._ocf_task.done()
+    assert poll.done()
+    assert coordinator.ocf is None
     ocf.async_close.assert_awaited_once()
 
 
@@ -114,9 +115,11 @@ async def test_shutdown_drains_active_ocf_poll_before_closing(
     ocf.async_close.side_effect = close
     coordinator._next_ocf = 0
     coordinator._schedule_ocf()
+    poll = coordinator._ocf_task
     await started.wait()
     await coordinator.async_shutdown()
-    assert coordinator._ocf_task.done()
+    assert poll.done()
+    assert coordinator.ocf is None
     ocf.async_close.assert_awaited_once()
 
 
@@ -161,7 +164,6 @@ async def test_ocf_outage_does_not_disable_rpc_or_remove_entities(
     assert entry.runtime_data.device.volume_level == 0.08
     assert not entry.runtime_data.coordinator.state.snapshot().ocf_available
     assert registered(hass, entry) == before
-    transports.auth.assert_not_awaited()
 
 
 async def test_ocf_diagnostic_service_cannot_read_arbitrary_path(
@@ -186,14 +188,11 @@ async def test_discovery_includes_only_projected_ocf_values(
 ):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    response = await entry.runtime_data.device.async_dump_discovery_snapshot(
-        include_raw_status=False
-    )
+    response = await entry.runtime_data.device.async_dump_discovery_snapshot()
     assert response["ocf"]["values"]["woofer_level"] == 1
     assert response["local"]["available"]
     assert "PRIVATE" not in repr(response)
     assert response["coordinator"]["transports"] == {
         "rpc": True,
         "ocf": True,
-        "cloud": False,
     }

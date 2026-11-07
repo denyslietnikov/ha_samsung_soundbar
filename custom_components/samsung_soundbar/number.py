@@ -29,7 +29,7 @@ async def async_setup_entry(
     def discover():
         nonlocal added
         entities = []
-        if not added and device.can_control_woofer_level:
+        if not added and device.ocf_woofer_profile is not None:
             added = True
             entities.append(SoundbarWooferNumberEntity(device, "woofer_level"))
         for field, profile in Q800F_TONE.items():
@@ -77,8 +77,6 @@ class SoundbarToneNumberEntity(NumberEntity):
 class SoundbarWooferNumberEntity(NumberEntity):
     _attr_has_entity_name = True
     _soundbar_woofer_absolute = True
-    _soundbar_cloud_only = True
-    _soundbar_cloud_capabilities = ("execute",)
 
     def __init__(
         self,

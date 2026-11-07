@@ -7,7 +7,6 @@ from typing import Any
 from .ocf_state import OCF_FIELDS
 
 LOCAL_TTL = 120.0
-CLOUD_TTL = 60.0
 STREAMING_TTL = 15.0
 WRITE_SETTLE_TIME = 5.0
 LOCAL_FIELDS = frozenset(
@@ -40,7 +39,6 @@ class StateSnapshot:
     values: dict[str, Any]
     available: bool
     local_available: bool
-    cloud_available: bool
     ocf_available: bool = False
     ocf_unavailable_fields: frozenset[str] = frozenset()
     ocf_fresh_fields: frozenset[str] = frozenset()
@@ -49,18 +47,15 @@ class StateSnapshot:
 class SoundbarState:
     """Merge partial reads without making omitted fields fresh again."""
 
-    def __init__(self, *, local: bool, cloud: bool, ocf: bool = False, clock=monotonic):
+    def __init__(self, *, local: bool = True, ocf: bool = False, clock=monotonic):
         self.use_local = local
-        self.use_cloud = cloud
         self.use_ocf = ocf and local
-        self.ocf_cloud_fallback = True
         self.clock = clock
         self.records: dict[str, dict[str, FieldValue]] = {
             "rpc": {},
             "ocf": {},
-            "cloud": {},
         }
-        self.transport_available = {"rpc": False, "ocf": False, "cloud": False}
+        self.transport_available = {"rpc": False, "ocf": False}
         self.pending: dict[str, FieldValue] = {}
         self.write_only: dict[str, FieldValue] = {}
         self.written_at: dict[str, float] = {}
@@ -71,18 +66,22 @@ class SoundbarState:
         self, source: str, values: dict[str, Any], *, observed_at: float | None = None
     ):
         source = "rpc" if source == "local" else source
+        if source not in self.records:
+            raise ValueError("Unknown local transport")
         if (
             source == "rpc"
             and not self.use_local
-            or source == "cloud"
-            and not self.use_cloud
             or source == "ocf"
             and not self.use_ocf
         ):
             return
         now = self.clock() if observed_at is None else observed_at
         for key, value in values.items():
-            if value is None or now < self.written_at.get(key, float("-inf")):
+            if (
+                source not in self._sources(key)
+                or value is None
+                or now < self.written_at.get(key, float("-inf"))
+            ):
                 continue
             previous = self.records[source].get(key)
             if previous is not None and previous.observed_at > now:
@@ -92,7 +91,7 @@ class SoundbarState:
                 if source == "rpc" and key == "local_identifier"
                 else STREAMING_TTL
                 if key == "sound_from_detail_name"
-                else (CLOUD_TTL if source == "cloud" else LOCAL_TTL)
+                else LOCAL_TTL
             )
             self.records[source][key] = FieldValue(value, source, now, ttl)
             # Only the field owner or the write transport may confirm optimism.
@@ -104,11 +103,6 @@ class SoundbarState:
             if not authoritative:
                 continue
             self.write_only.pop(key, None)
-            if source == "ocf" and self.write_sources.get(key) == "cloud":
-                # Fresh authenticated OCF evidence outranks an earlier Cloud
-                # command's optimism, even before its settling interval expires.
-                self.pending.pop(key, None)
-                pending = None
             if pending is not None and pending.value == value and authoritative:
                 self.pending.pop(key)
                 self.write_only.pop(key, None)
@@ -124,7 +118,11 @@ class SoundbarState:
     ):
         now = self.clock()
         for key, value in values.items():
-            if value is None:
+            if (
+                value is None
+                or self._sources(key) != ("rpc",)
+                or source not in (None, "rpc")
+            ):
                 continue
             self.written_at[key] = now
             self.write_sources[key] = source or self._sources(key)[0]
@@ -142,34 +140,18 @@ class SoundbarState:
             self.pending.pop(key, None)
             self.write_only.pop(key, None)
 
-    def discard_cloud_fields(self, fields: set[str]):
-        """Remove explicitly disabled Cloud state without discarding LAN writes."""
-        for key in fields:
-            self.records["cloud"].pop(key, None)
-            if (
-                self._sources(key)[0] == "cloud"
-                or self.write_sources.get(key) == "cloud"
-            ):
-                self.pending.pop(key, None)
-                self.write_only.pop(key, None)
-
     def invalidate(self, source, fields):
         for key in fields:
             self.records[source].pop(key, None)
-            if self._sources(key)[0] == source:
+            if source in self._sources(key):
                 self.pending.pop(key, None)
                 self.write_only.pop(key, None)
 
     def _sources(self, key):
-        if self.use_local and key in LOCAL_FIELDS:
-            return ("rpc", "cloud") if self.use_cloud else ("rpc",)
-        if self.use_ocf and key in OCF_FIELDS:
-            return (
-                ("ocf", "cloud")
-                if self.use_cloud and self.ocf_cloud_fallback
-                else ("ocf",)
-            )
-        return ("cloud",)
+        if key in OCF_FIELDS:
+            return ("ocf",) if self.use_ocf else ()
+        # Core fields and optional media metadata belong to RPC, never OCF.
+        return ("rpc",) if self.use_local else ()
 
     def resolve(self, key: str) -> FieldValue | None:
         now = self.clock()
@@ -202,20 +184,13 @@ class SoundbarState:
         }
         local = self.use_local and self.transport_available["rpc"]
         ocf = self.use_ocf and self.transport_available["ocf"]
-        cloud = self.use_cloud and self.transport_available["cloud"]
-        cached_local = (
-            self.use_cloud
-            and self.resolve("power") is not None
-            and self.resolve("power").source == "rpc"
-        )
         return StateSnapshot(
-            values,
-            bool(local or cloud or cached_local),
-            bool(local),
-            bool(cloud),
-            bool(ocf),
-            frozenset(self.ocf_unavailable_fields),
-            frozenset(
+            values=values,
+            available=bool(local),
+            local_available=bool(local),
+            ocf_available=bool(ocf),
+            ocf_unavailable_fields=frozenset(self.ocf_unavailable_fields),
+            ocf_fresh_fields=frozenset(
                 key
                 for key, record in self.records["ocf"].items()
                 if ocf

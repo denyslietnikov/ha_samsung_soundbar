@@ -16,7 +16,7 @@ from .const import (
     CONF_LOCAL_HOST,
     CONF_LOCAL_IDENTITY,
     CONF_LOCAL_TIMEOUT,
-    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+    CONTROL_MODE_HYBRID_LOCAL_OCF,
     CONTROL_MODE_LOCAL_ONLY,
     DOMAIN,
 )
@@ -50,7 +50,7 @@ def _matching_entries(hass: HomeAssistant, mac: str) -> list[ConfigEntry]:
         mode, host, identity = _local_config(entry)
         if (
             entry.disabled_by is None
-            and mode in (CONTROL_MODE_LOCAL_ONLY, CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS)
+            and mode in (CONTROL_MODE_LOCAL_ONLY, CONTROL_MODE_HYBRID_LOCAL_OCF)
             and host
             and normalize_mac(identity.get("wifi_mac")) == mac
         ):

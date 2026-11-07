@@ -6,14 +6,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
-from pysmartthings import SmartThings
 
 if TYPE_CHECKING:
     from .api_extension.SoundbarDevice import SoundbarDevice
-    from .auth import SmartThingsAuthProvider
     from .coordinator import SoundbarCoordinator
     from .local_ocf import LocalSoundbarOcfClient
-    from .subscription import SmartThingsSubscriptionRuntime
 
 
 @dataclass(slots=True)
@@ -24,10 +21,6 @@ class SoundbarRuntimeData:
     coordinator: SoundbarCoordinator
     config: dict[str, Any]
     options: dict[str, Any]
-    api: SmartThings | None = None
-    auth_provider: SmartThingsAuthProvider | None = None
-    subscription: SmartThingsSubscriptionRuntime | None = None
-    reauth_pending: bool = False
     ocf: LocalSoundbarOcfClient | None = field(default=None, repr=False)
 
 

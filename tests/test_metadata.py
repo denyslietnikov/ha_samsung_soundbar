@@ -13,13 +13,15 @@ INTEGRATION = ROOT / "custom_components" / "samsung_soundbar"
 
 
 class MetadataTests(unittest.TestCase):
-    def test_manifest_order_and_shared_dependency(self):
+    def test_manifest_order_and_local_dependencies(self):
         manifest = json.loads((INTEGRATION / "manifest.json").read_text())
         self.assertEqual(list(manifest)[:2], ["domain", "name"])
         self.assertEqual(list(manifest)[2:], sorted(list(manifest)[2:]))
         requirement = Requirement(manifest["requirements"][0])
-        self.assertEqual(requirement.name, "pysmartthings")
-        self.assertEqual(str(requirement.specifier), ">=4.0.3")
+        self.assertEqual(requirement.name, "smartthings-local")
+        self.assertEqual(str(requirement.specifier), "==0.1.24")
+        self.assertEqual(manifest["iot_class"], "local_polling")
+        self.assertFalse(manifest.get("dependencies"))
         self.assertIn("media_entertainment.speakers_audio", manifest["categories"])
 
     def test_entity_services_target_media_players(self):
@@ -41,19 +43,6 @@ class MetadataTests(unittest.TestCase):
                 "sound_mode",
                 ["standard", "surround", "game", "adaptive sound"],
             ),
-            (
-                "set_speaker_level",
-                "speaker_identifier",
-                [
-                    "Spk_Center",
-                    "Spk_Side",
-                    "Spk_Wide",
-                    "Spk_Front_Top",
-                    "Spk_Rear",
-                    "Spk_Rear_Top",
-                ],
-            ),
-            ("set_rear_speaker_mode", "speaker_mode", ["Rear", "Front"]),
         )
         for service, field, expected in cases:
             with self.subTest(service=service):

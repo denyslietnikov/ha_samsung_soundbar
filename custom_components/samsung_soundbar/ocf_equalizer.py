@@ -26,7 +26,12 @@ class OcfEqualizer:
 
     def value(self, field):
         coordinator = self.device.coordinator
-        if coordinator is None:
+        if (
+            coordinator is None
+            or not self.device.ocf_enabled
+            or not coordinator.state.use_ocf
+            or coordinator.ocf is None
+        ):
             return None
         record = coordinator.state.records["ocf"].get(field)
         return (
@@ -40,15 +45,16 @@ class OcfEqualizer:
         coordinator = self.device.coordinator
         if (
             coordinator is None
+            or not self.device.ocf_enabled
             or not coordinator.state.use_ocf
             or coordinator.ocf is None
+            or coordinator.ocf.validated is not True
         ):
             return None
         if self._profile is not None:
             return self._profile
         if (
-            coordinator.ocf.validated is True
-            and (
+            (
                 self.device.model == Q800F_WOOFER.model
                 or self.device.local_identifier == Q800F_WOOFER.rpc_identifier
             )

@@ -5,28 +5,23 @@ import datetime
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock
 
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.samsung_soundbar.api_extension.SoundbarDevice import (
     SoundbarDevice,
 )
 from custom_components.samsung_soundbar.const import (
-    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
-    CONTROL_MODE_SMARTTHINGS_CLOUD,
+    CONTROL_MODE_HYBRID_LOCAL_OCF,
 )
 from custom_components.samsung_soundbar.coordinator import (
     LOCAL_INTERVAL,
     SoundbarCoordinator,
-)
-from custom_components.samsung_soundbar.entity_updates import (
-    register_device_update_listener,
 )
 from custom_components.samsung_soundbar.local_device import LocalDevice
 from custom_components.samsung_soundbar.local_rpc import (
     LocalRpcCommandError,
     LocalRpcError,
 )
-from custom_components.samsung_soundbar.switch import SoundbarSwitchAdvancedAudio
 
 
 class TestHybridState(IsolatedAsyncioTestCase):
@@ -60,7 +55,7 @@ class TestHybridState(IsolatedAsyncioTestCase):
             session=MagicMock(),
             max_volume=100,
             device_name="Soundbar Q800F",
-            control_mode=CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
+            control_mode=CONTROL_MODE_HYBRID_LOCAL_OCF,
             local_rpc=self.rpc,
         )
 
@@ -113,15 +108,15 @@ class TestHybridState(IsolatedAsyncioTestCase):
 
         self.rpc.power_state.side_effect = LocalRpcError("offline")
         await self.device.update_local_input_source(min_age=None)
-        self.assertTrue(self.device.local_available)
-        self.assertEqual(self.device.volume_level, 0.08)
+        self.assertFalse(self.device.local_available)
+        self.assertIsNone(self.device.volume_level)
 
-        self.device._SoundbarDevice__local_status_updated_at = (
-            datetime.datetime.now() - datetime.timedelta(minutes=3)
-        )
+        self.device._SoundbarDevice__local_status_updated_at = datetime.datetime.now(
+            datetime.UTC
+        ) - datetime.timedelta(minutes=3)
         await self.device.update_local_input_source(min_age=None)
         self.assertFalse(self.device.local_available)
-        self.assertEqual(self.device.volume_level, 0.24)
+        self.assertIsNone(self.device.volume_level)
 
         self.rpc.power_state.side_effect = None
         self.rpc.volume.return_value = 10
@@ -132,28 +127,19 @@ class TestHybridState(IsolatedAsyncioTestCase):
         self.assertEqual(self.device.volume_level, 0.10)
         listener.assert_called_once()
 
-    async def test_cloud_refresh_does_not_request_local_state(self) -> None:
-        await self.device.update_local_input_source(min_age=None)
-        self.device._update_media = AsyncMock()
-        listener = MagicMock()
-        self.device.add_update_listener(listener)
-        self.rpc.power_state.reset_mock()
-        await self.device.update_cloud_status()
-        self.device.device.status.refresh.assert_awaited_once()
-        self.rpc.power_state.assert_not_awaited()
-        self.assertEqual(self.device.volume_level, 0.08)
-        self.assertEqual(self.device.sound_from_detail_name, "External Device")
-        listener.assert_called_once()
-
     async def test_full_readback_merges_partial_values(self) -> None:
         await self.device.update_local_input_source(min_age=None)
-        self.rpc.status = AsyncMock(return_value={"volume": None, "input_source": "WIFI_GOOGLE"})
+        self.rpc.status = AsyncMock(
+            return_value={"volume": None, "input_source": "WIFI_GOOGLE"}
+        )
         await self.device.update_local_status(min_age=None)
         self.assertEqual(self.device.volume_level, 0.08)
         self.assertEqual(self.device.input_source, "WIFI")
         self.assertEqual(self.device.sound_from_detail_name, "Google Cast")
 
-    async def test_reachable_command_failure_does_not_repeat_write_via_cloud(self) -> None:
+    async def test_reachable_command_failure_does_not_repeat_write_via_cloud(
+        self,
+    ) -> None:
         await self.device.update_local_input_source(min_age=None)
         self.rpc.set_volume = AsyncMock(side_effect=LocalRpcCommandError("no progress"))
         self.rpc.status = AsyncMock(return_value={"power": "powerOn", "volume": 9})
@@ -165,15 +151,6 @@ class TestHybridState(IsolatedAsyncioTestCase):
         self.device.device.set_volume.assert_not_awaited()
         self.assertTrue(self.device.local_available)
         self.assertEqual(self.device.volume_level, 0.09)
-
-    async def test_transport_failure_still_allows_hybrid_cloud_fallback(self) -> None:
-        self.rpc.set_volume = AsyncMock(side_effect=LocalRpcError("offline"))
-        self.device.device.set_volume = AsyncMock()
-
-        await self.device.set_volume(0.10)
-
-        self.device.device.set_volume.assert_awaited_once_with(10, True)
-        self.assertFalse(self.device.local_available)
 
     async def test_failed_poll_drains_other_reads_before_next_cycle(self) -> None:
         started, release = asyncio.Event(), asyncio.Event()
@@ -192,39 +169,6 @@ class TestHybridState(IsolatedAsyncioTestCase):
         await poll
         self.assertFalse(self.device.local_available)
 
-    async def test_entities_share_push_and_advanced_audio_stays_optimistic(self) -> None:
-        entry = MagicMock()
-        entity = MagicMock()
-        entity.hass = object()
-        register_device_update_listener(entry, self.device, [entity])
-        self.assertFalse(entity._attr_should_poll)
-        await self.device.update_local_input_source(min_age=None)
-        entity.async_write_ha_state.assert_called_once()
-
-        switch = SoundbarSwitchAdvancedAudio(
-            self.device, "Bassmode", lambda: False, AsyncMock(), AsyncMock()
-        )
-        switch.async_write_ha_state = MagicMock()
-        await switch.async_turn_on()
-        self.assertTrue(switch.is_on)
-        self.device._update_media = AsyncMock()
-        await self.device.update_cloud_status()
-        self.assertTrue(switch.is_on)
-
-    def test_cloud_only_keeps_entity_polling_and_cloud_sound_from(self) -> None:
-        cloud_device = SoundbarDevice(
-            self.device.device,
-            session=MagicMock(),
-            max_volume=100,
-            device_name="Soundbar Q800F",
-            control_mode=CONTROL_MODE_SMARTTHINGS_CLOUD,
-        )
-        entity = MagicMock()
-        entity._attr_should_poll = True
-        register_device_update_listener(MagicMock(), cloud_device, [entity])
-        self.assertTrue(entity._attr_should_poll)
-        self.assertEqual(cloud_device.sound_from_detail_name, "AirPlay")
-
 
 class TestHybridPolling(IsolatedAsyncioTestCase):
     async def test_one_coordinator_and_overlapping_ticks_coalesce(self) -> None:
@@ -232,7 +176,7 @@ class TestHybridPolling(IsolatedAsyncioTestCase):
         entry = MagicMock()
         device = MagicMock()
         device.local_only = False
-        device.hybrid_mode = True
+        device.local_rpc_enabled = True
         started = asyncio.Event()
         release = asyncio.Event()
 
@@ -242,7 +186,6 @@ class TestHybridPolling(IsolatedAsyncioTestCase):
 
         device.update_local_input_source = AsyncMock(side_effect=slow_local)
         device.update_local_status = AsyncMock()
-        device.update_cloud_status = AsyncMock()
         coordinator = SoundbarCoordinator(hass, entry, device)
         coordinator._next_full_local = float("inf")
         self.assertEqual(coordinator.update_interval, LOCAL_INTERVAL)
@@ -254,20 +197,4 @@ class TestHybridPolling(IsolatedAsyncioTestCase):
         await first
         await second
         device.update_local_input_source.assert_awaited_once_with(min_age=None)
-        device.update_cloud_status.assert_awaited_once()
         entry.async_on_unload.assert_any_call(coordinator.async_shutdown)
-
-    async def test_cloud_outage_does_not_start_local_reauth(self) -> None:
-        hass = MagicMock()
-        entry = MagicMock()
-        device = MagicMock()
-        device.local_only = False
-        device.hybrid_mode = True
-        device.update_local_status = AsyncMock()
-        device.update_cloud_status = AsyncMock(
-            side_effect=ConfigEntryNotReady("offline")
-        )
-        coordinator = SoundbarCoordinator(hass, entry, device)
-        await coordinator._async_update_data()
-        device.handle_smartthings_availability.assert_called_once_with(False)
-        entry.async_start_reauth.assert_not_called()

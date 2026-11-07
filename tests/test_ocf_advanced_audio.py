@@ -1,6 +1,5 @@
 """Local audio switch profiles, exact single-field writes and authoritative state."""
 
-import asyncio
 from copy import deepcopy
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock
@@ -10,9 +9,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.samsung_soundbar import switch
 from custom_components.samsung_soundbar.const import (
-    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
-    CONTROL_MODE_LOCAL_ONLY,
-    CONTROL_MODE_SMARTTHINGS_CLOUD,
+    CONTROL_MODE_HYBRID_LOCAL_OCF,
 )
 from custom_components.samsung_soundbar.local_ocf import OcfError, OcfWriteResult
 
@@ -62,7 +59,7 @@ class TestOcfAdvancedAudio(IsolatedAsyncioTestCase):
     setUp = fixtures.TestCoordinator.setUp
     make_device = fixtures.TestCoordinator.make_device
 
-    def prepare(self, mode=CONTROL_MODE_LOCAL_ONLY):
+    def prepare(self, mode=CONTROL_MODE_HYBRID_LOCAL_OCF):
         device, coordinator = self.make_device(mode)
         self.payloads = {
             ADVANCED: {
@@ -129,7 +126,6 @@ class TestOcfAdvancedAudio(IsolatedAsyncioTestCase):
                 self.payloads[href][PREFIX + raw] = before[href][PREFIX + raw]
                 self.assertEqual(self.payloads, before)
                 await coordinator.async_refresh_all()
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_non_boolean_input_is_rejected_without_io(self):
         device, coordinator, client = self.prepare()
@@ -173,7 +169,6 @@ class TestOcfAdvancedAudio(IsolatedAsyncioTestCase):
         with self.assertRaises(HomeAssistantError):
             await device.set_moderate_bass(False)
         client.async_write.assert_not_awaited()
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_missing_field_is_not_created_until_valid_readback_and_not_forced_off(
         self,
@@ -209,7 +204,6 @@ class TestOcfAdvancedAudio(IsolatedAsyncioTestCase):
                 await device.set_moderate_bass(True)
             client.async_write.assert_awaited_once()
             self.assertIs(device.moderate_bass, False)
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_unverified_model_does_not_expose_local_switches(self):
         device, coordinator, client = self.prepare()
@@ -223,104 +217,6 @@ class TestOcfAdvancedAudio(IsolatedAsyncioTestCase):
         with self.assertRaises(HomeAssistantError):
             await device.set_moderate_bass(True)
         client.async_write.assert_not_awaited()
-
-    async def test_cloud_only_legacy_commands_are_preserved_without_moderate_bass_guess(
-        self,
-    ):
-        device, coordinator = self.make_device(CONTROL_MODE_SMARTTHINGS_CLOUD)
-        await coordinator.async_refresh_all()
-        device.set_custom_execution_data = AsyncMock()
-        for _, _, setter, _, href, raw in SETTINGS:
-            if raw == "moderatebass":
-                with self.assertRaises(HomeAssistantError):
-                    await getattr(device, setter)(True)
-            else:
-                await getattr(device, setter)(True)
-                device.set_custom_execution_data.assert_awaited_with(
-                    href=href, property=PREFIX + raw, value=1
-                )
-        self.assertEqual(device.set_custom_execution_data.await_count, 5)
-        self.rpc.status.assert_not_awaited()
-
-    async def test_new_ocf_write_supersedes_old_cloud_optimism(self):
-        device, coordinator, _client = self.prepare()
-        await coordinator.async_refresh_all()
-        coordinator.state.expect({"bass_mode": True}, write_only=True, source="cloud")
-        await device.set_bass_mode(False)
-        self.assertIs(device.bass_mode, False)
-        self.assertNotIn("bass_mode", coordinator.state.pending)
-        self.assertEqual(coordinator.state.write_sources["bass_mode"], "ocf")
-
-    async def test_queued_cloud_write_cannot_outlive_its_field_profile_transition(self):
-        device, coordinator, client = self.prepare(
-            CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
-        )
-        started, release = asyncio.Event(), asyncio.Event()
-
-        async def read(href):
-            if href == ADVANCED:
-                started.set()
-                await release.wait()
-            return deepcopy(self.payloads.get(href, {}))
-
-        client.async_read.side_effect = read
-        device.set_custom_execution_data = AsyncMock()
-        await coordinator.async_refresh()
-        await started.wait()
-        task = asyncio.create_task(device.set_night_mode(True))
-        await asyncio.sleep(0)
-        release.set()
-        with self.assertRaises(HomeAssistantError):
-            await task
-        device.set_custom_execution_data.assert_not_awaited()
-        client.async_write.assert_not_awaited()
-
-    async def test_missing_ocf_field_preserves_only_that_legacy_cloud_route(self):
-        device, coordinator, client = self.prepare(
-            CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
-        )
-        del self.payloads[ADVANCED][PREFIX + "virtual"]
-        await coordinator.async_refresh_all()
-        device.set_custom_execution_data = AsyncMock()
-        await device.set_virtual_sound(True)
-        device.set_custom_execution_data.assert_awaited_once_with(
-            href=ADVANCED, property=PREFIX + "virtual", value=1
-        )
-        client.async_write.assert_not_awaited()
-        self.assertIsNotNone(device.ocf_audio_profile("night_mode"))
-        self.assertIsNone(device.ocf_audio_profile("virtual_sound"))
-
-    async def test_late_ocf_discovery_supersedes_contradictory_cloud_optimism(self):
-        device, coordinator, _client = self.prepare(
-            CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
-        )
-        del self.payloads[ADVANCED][PREFIX + "bassboost"]
-        await coordinator.async_refresh_all()
-        device.set_custom_execution_data = AsyncMock()
-        self.now = 2
-        await device.set_bass_mode(True)
-        self.assertIs(device.bass_mode, True)
-        self.now = 3
-        self.payloads[ADVANCED][PREFIX + "bassboost"] = 0
-        await coordinator.async_refresh_all()
-        self.assertIsNotNone(device.ocf_audio_profile("bass_mode"))
-        self.assertIs(device.bass_mode, False)
-        self.assertNotIn("bass_mode", coordinator.state.pending)
-
-    async def test_pre_cloud_write_cache_cannot_establish_a_new_local_route(self):
-        device, coordinator, _client = self.prepare(
-            CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
-        )
-        self.rpc.status.return_value = {
-            **fixtures.LOCAL_STATUS,
-            "identifier": "unknown",
-        }
-        await coordinator.async_refresh_all()
-        device.set_custom_execution_data = AsyncMock()
-        self.now = 2
-        await device.set_bass_mode(True)
-        coordinator.receive("rpc", {"local_identifier": "22_AV_HW-Q800F"})
-        self.assertIsNone(device.ocf_audio_profile("bass_mode"))
 
 
 if __name__ == "__main__":

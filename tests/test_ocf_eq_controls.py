@@ -7,9 +7,7 @@ import test_coordinator as fixtures
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.samsung_soundbar.const import (
-    CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS,
-    CONTROL_MODE_LOCAL_ONLY,
-    CONTROL_MODE_SMARTTHINGS_CLOUD,
+    CONTROL_MODE_HYBRID_LOCAL_OCF,
 )
 from custom_components.samsung_soundbar.local_ocf import OcfError, OcfWriteResult
 from custom_components.samsung_soundbar.local_rpc import LocalRpcError
@@ -71,7 +69,7 @@ class TestOcfEqualizer(IsolatedAsyncioTestCase):
     setUp = fixtures.TestCoordinator.setUp
     make_device = fixtures.TestCoordinator.make_device
 
-    def prepare(self, mode=CONTROL_MODE_LOCAL_ONLY):
+    def prepare(self, mode=CONTROL_MODE_HYBRID_LOCAL_OCF):
         self.rpc.power_state.return_value = "powerOn"
         self.rpc.sound_mode.return_value = "STANDARD"
         self.rpc.sound_mode.side_effect = None
@@ -113,14 +111,12 @@ class TestOcfEqualizer(IsolatedAsyncioTestCase):
         self.assertEqual(device.active_equalizer_preset, "NONE")
         self.assertEqual(device.equalizer_bands, [0] * 7)
         self.assertIsNotNone(device.ocf_equalizer.profile)
-        self.assertFalse(device.can_select_equalizer_preset)
         await device.set_equalizer_preset("POP")
         self.assertEqual(
             client.async_write.call_args.args,
             (EQ, {P + "EQname": "POP", P + "action": "setEQmode"}),
         )
         self.assertEqual(device.active_equalizer_preset, "POP")
-        self.cloud.status.refresh.assert_not_awaited()
 
     async def test_unknown_preset_is_rejected_without_io(self):
         device, coordinator, client = self.prepare()
@@ -154,12 +150,10 @@ class TestOcfEqualizer(IsolatedAsyncioTestCase):
         device, coordinator, client = self.prepare()
         await coordinator.async_refresh_all()
         self.assertIsNotNone(device.ocf_equalizer.profile)
-        self.assertFalse(device.can_select_equalizer_preset)
         self.payloads[EQ][P + "EQband"] = ["0"] * 6
         with self.assertRaises(HomeAssistantError):
             await device.set_equalizer_preset("POP")
         client.async_write.assert_not_awaited()
-        self.cloud.status.refresh.assert_not_awaited()
         client.available = False
         client.async_read.side_effect = OcfError("auth")
         await coordinator.async_refresh_all()
@@ -167,43 +161,18 @@ class TestOcfEqualizer(IsolatedAsyncioTestCase):
             await device.set_equalizer_preset("CUSTOM")
 
     async def test_unsupported_or_unknown_model_does_not_create_eq_control(self):
-        device, coordinator, client = self.prepare()
+        _device, coordinator, client = self.prepare()
         self.payloads[EQ][P + "isSupported"] = 0
         await coordinator.async_refresh_all()
-        self.assertFalse(device.can_select_equalizer_preset)
         client.async_write.assert_not_awaited()
 
     async def test_hybrid_failed_eq_write_has_no_cloud_replay(self):
-        device, coordinator, client = self.prepare(
-            CONTROL_MODE_HYBRID_LOCAL_SMARTTHINGS
-        )
+        device, coordinator, client = self.prepare(CONTROL_MODE_HYBRID_LOCAL_OCF)
         await coordinator.async_refresh_all()
-        device.set_custom_execution_data = AsyncMock()
         client.async_write.side_effect = OcfError("transport")
         with self.assertRaises(HomeAssistantError):
             await device.set_equalizer_preset("POP")
         client.async_write.assert_awaited_once()
-        device.set_custom_execution_data.assert_not_awaited()
-
-    async def test_cloud_only_preserves_legacy_preset_route(self):
-        device, coordinator, client = self.prepare(CONTROL_MODE_SMARTTHINGS_CLOUD)
-        await coordinator.async_refresh_all()
-        device.set_custom_execution_data = AsyncMock()
-        await device.set_equalizer_preset("POP")
-        device.set_custom_execution_data.assert_awaited_once_with(
-            href=EQ, property=P + "EQname", value="POP"
-        )
-        client.async_write.assert_not_awaited()
-
-    async def test_cloud_selector_still_requires_explicit_option_and_readable_state(self):
-        device, coordinator, _client = self.prepare(CONTROL_MODE_SMARTTHINGS_CLOUD)
-        await coordinator.async_refresh_all()
-        device._SoundbarDevice__enable_eq = True
-        device._SoundbarDevice__equalizer_supported = True
-        device._SoundbarDevice__supported_eq_presets = ["NONE", "CUSTOM"]
-        self.assertTrue(device.can_select_equalizer_preset)
-        device._SoundbarDevice__enable_eq = False
-        self.assertFalse(device.can_select_equalizer_preset)
 
     async def test_preflight_requires_new_rpc_power_and_mode_not_cached_values(self):
         for failure in ("power", "mode", "missing", "error"):

@@ -22,11 +22,6 @@ def register_device_update_listener(
     coordinator = device.coordinator
 
     def available_for(entity):
-        if (
-            getattr(entity, "_soundbar_eq_preset", False) is True
-            and device.ocf_equalizer.profile is not None
-        ):
-            return device.ocf_equalizer.available
         tone_field = getattr(entity, "_soundbar_tone_field", None)
         if isinstance(tone_field, str):
             return device.tone_control_available(tone_field)
@@ -55,22 +50,11 @@ def register_device_update_listener(
                 not getattr(entity, "_soundbar_requires_on", False)
                 or device.state in ("on", "playing", "paused")
             )
-        capabilities = getattr(entity, "_soundbar_cloud_capabilities", ())
-        if (
-            capabilities
-            and (
-                getattr(entity, "_soundbar_cloud_only", False) or not device.hybrid_mode
-            )
-            and device.cloud_feature_disabled(*capabilities)
-        ):
-            return False
-        if coordinator is not None and getattr(entity, "_soundbar_cloud_only", False):
-            return coordinator.state.snapshot().cloud_available
         return device.available
 
     for entity in tracked_entities:
         entity._attr_available = available_for(entity)
-        if coordinator is not None or device.hybrid_mode:
+        if coordinator is not None or device.local_rpc_enabled:
             entity._attr_should_poll = False
 
     @callback

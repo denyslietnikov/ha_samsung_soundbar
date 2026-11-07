@@ -26,9 +26,7 @@ def async_remove_woofer_buttons(
 
 
 @callback
-def async_sync_eq_entity(
-    hass: HomeAssistant, entry: SoundbarConfigEntry, enabled: bool
-) -> None:
+def async_sync_eq_entity(hass: HomeAssistant, entry: SoundbarConfigEntry) -> None:
     device_id = entry.data.get(CONF_ENTRY_DEVICE_ID)
     if not device_id:
         return
@@ -41,9 +39,4 @@ def async_sync_eq_entity(
     item = registry.async_get(entity_id)
     if item is None or item.config_entry_id != entry.entry_id:
         return
-    if not enabled and item.disabled_by is None:
-        registry.async_update_entity(
-            entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
-        )
-    elif enabled and item.disabled_by is er.RegistryEntryDisabler.INTEGRATION:
-        registry.async_update_entity(entity_id, disabled_by=None)
+    registry.async_remove(entity_id)

@@ -6,11 +6,40 @@ from unittest.mock import AsyncMock, MagicMock
 from custom_components.samsung_soundbar.local_identity import (
     LocalIdentityError,
     async_read_local_identity,
+    has_stable_identity,
     identities_match,
 )
 
 
 class TestLocalIdentity(IsolatedAsyncioTestCase):
+    def test_saved_binding_requires_real_mac_or_uuid_not_model_or_address(self):
+        for invalid in (
+            None,
+            {},
+            {"model": "HW-Q800F"},
+            {"host": "192.0.2.26"},
+            {"wifi_mac": "00:00:00:00:00:00"},
+            {"tizen_duid": "not-a-uuid"},
+        ):
+            with self.subTest(identity=invalid):
+                self.assertFalse(has_stable_identity(invalid))
+        self.assertTrue(has_stable_identity({"wifi_mac": "94:E6:BA:89:BD:BA"}))
+        self.assertTrue(
+            has_stable_identity(
+                {"tizen_duid": "uuid:f289154e-3c4a-41d8-ba8f-86850cf9be07"}
+            )
+        )
+        self.assertTrue(
+            has_stable_identity(
+                {"upnp_udn": "uuid:ffa77b59-a763-4caa-ba60-028de1be4bdf"}
+            )
+        )
+        self.assertFalse(
+            has_stable_identity(
+                {"wifi_mac": "94:e6:ba:89:bd:ba", "tizen_duid": "invalid"}
+            )
+        )
+
     @staticmethod
     def response(*, json=None, body=b"", error=None, json_error=None):
         response = MagicMock()
@@ -25,8 +54,17 @@ class TestLocalIdentity(IsolatedAsyncioTestCase):
     async def test_tizen_and_upnp_identifiers(self) -> None:
         session = MagicMock()
         session.get.side_effect = [
-            self.response(json={"device": {"wifiMac": "94:E6:BA:89:BD:BA", "duid": "uuid:f289154e-3c4a-41d8-ba8f-86850cf9be07"}}),
-            self.response(body=b'<root xmlns="urn:samsung.com:device-1-0"><device><UDN>uuid:ffa77b59-a763-4caa-ba60-028de1be4bdf</UDN></device></root>'),
+            self.response(
+                json={
+                    "device": {
+                        "wifiMac": "94:E6:BA:89:BD:BA",
+                        "duid": "uuid:f289154e-3c4a-41d8-ba8f-86850cf9be07",
+                    }
+                }
+            ),
+            self.response(
+                body=b'<root xmlns="urn:samsung.com:device-1-0"><device><UDN>uuid:ffa77b59-a763-4caa-ba60-028de1be4bdf</UDN></device></root>'
+            ),
         ]
         identity = await async_read_local_identity(session, "192.0.2.26", 8)
         self.assertEqual(identity["wifi_mac"], "94:e6:ba:89:bd:ba")
@@ -40,7 +78,9 @@ class TestLocalIdentity(IsolatedAsyncioTestCase):
         session = MagicMock()
         session.get.side_effect = [
             self.response(json={"device": {"wifiMac": "00:00:00:00:00:00"}}),
-            self.response(body=b'<root><device><UDN>uuid:ffa77b59-a763-4caa-ba60-028de1be4bdf</UDN></device></root>'),
+            self.response(
+                body=b"<root><device><UDN>uuid:ffa77b59-a763-4caa-ba60-028de1be4bdf</UDN></device></root>"
+            ),
         ]
         identity = await async_read_local_identity(session, "192.0.2.26", 8)
         self.assertEqual(list(identity), ["upnp_udn"])
@@ -67,7 +107,9 @@ class TestLocalIdentity(IsolatedAsyncioTestCase):
         session = MagicMock()
         session.get.side_effect = [
             TimeoutError("Tizen unavailable"),
-            self.response(body=b'<root><device><UDN>uuid:ffa77b59-a763-4caa-ba60-028de1be4bdf</UDN></device></root>'),
+            self.response(
+                body=b"<root><device><UDN>uuid:ffa77b59-a763-4caa-ba60-028de1be4bdf</UDN></device></root>"
+            ),
         ]
         identity = await async_read_local_identity(session, "192.0.2.26", 8)
         self.assertIn("upnp_udn", identity)
