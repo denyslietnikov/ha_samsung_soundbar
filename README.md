@@ -38,8 +38,8 @@ working local host. Its existing device and entity IDs are retained. New
 Local-only entries skip OAuth. Switching an existing entry to Local-only
 requires local identity confirmation and removes its stored OAuth credentials;
 returning to a cloud mode requires authorization again. Do not delete the entry
-to switch modes. Cloud-only switches and artwork are not available in Local-only
-mode.
+to switch modes. Without an imported OCF credential, Cloud-only advanced settings
+are not available in Local-only mode. Verified Q800F OCF controls work locally.
 
 ## Installation
 
@@ -141,8 +141,8 @@ recommended. Actual router/device address changes still need field-testing.
 Q800F research has confirmed authenticated local OCF access and Woofer
 read/write/readback. **OCF credential import and storage are available in the
 integration options. OCF audio-setting reads feed the shared coordinator, and
-Q800F has a verified local Woofer slider. Other OCF-backed controls are a later
-stage. Existing RPC core controls are unchanged.**
+Q800F has a verified local Woofer slider and six local audio switches. Other
+OCF-backed controls are a later stage. Existing RPC core controls are unchanged.**
 The offline extractor below only validates or explicitly exports
 an existing credential from a selected local file. It makes no network requests
 and cannot prove that the credential still authenticates. The optional Q800F
@@ -192,9 +192,9 @@ missing/null values do not refresh freshness, and readbacks expire after 120
 seconds. Hybrid may use fresh Cloud fallback for these fields only when the
 existing fallback option is enabled. A transport error is not a confirmed Off.
 
-Only the verified Q800F Woofer profile is currently enabled for local writes.
-Other Cloud-only advanced controls still require their own write probes. Unknown
-EQ/channel shapes and enums are omitted rather than guessed.
+Verified Q800F Woofer, Advanced Audio and SpaceFit profiles are enabled for local
+writes. Other controls still require their own write probes. Unknown EQ/channel
+shapes and enums are omitted rather than guessed.
 
 Use this read-only action to inspect the saved entry's audio settings:
 
@@ -240,6 +240,35 @@ readback, in addition to earlier 0/+1 evidence. In particular, -7 is valid over
 OCF, so this path is not restricted to -12 plus the -6..+6 levels. This was a
 bounded sample, not an exhaustive step scan. The original level and power were
 restored. Installation and UI operation in the user's HA still need a field test.
+
+### Local Advanced Audio and SpaceFit
+
+With authenticated OCF access and matching Q800F readback, the integration exposes
+**Bassmode**, **Nightmode**, **Voice Amplifier**, **Virtual**, **Moderate Bass** and
+**SpaceFit Sound** in both Local-only and Hybrid. The original four switch unique
+IDs are unchanged; the new suffixes are `_sw_moderate_bass` and
+`_sw_space_fit_sound`. Controls are discovered per field, not just from the model
+name or an advertised resource. Voice Amplifier is Voice Enhancement, not AVA Pro.
+
+These switches use actual OCF state, not retained Cloud optimism. Each action
+checks fresh target readback and RPC power inside the shared queue, writes one
+integer 0/1 property, then confirms the result. Virtual may lag its ACK; bounded
+GET-only polling waits for convergence without sending the POST again. A new local
+write or fresh local discovery supersedes older Cloud optimism. Unknown fields
+are not shown as Off, and a missing/unsupported field does not disable its neighbors.
+
+Once a field has a verified local route, an outage makes that switch unavailable;
+it never silently replays the action through Cloud. Other RPC controls continue
+working. Neither switch discovery nor a switch action turns on the soundbar.
+Without a matching OCF profile the original four Cloud switches and legacy
+SpaceFit action retain their old routes; Moderate Bass is not guessed over Cloud.
+The Advanced Audio option controls optional Cloud exposure; confirmed local
+switches are discovered automatically and can be disabled in HA entity settings.
+
+Owner-approved protocol probes toggled each of the six fields separately and
+restored every original value with GET confirmation. Neighboring audio fields
+were unchanged and original power was restored. Visual app-to-HA checks and
+operation in different sound modes still need a field test in the installed HA.
 
 ### Already Copied the Hashed Q800F Store?
 
@@ -431,8 +460,9 @@ private network details.
 
 `dump_discovery_snapshot` includes coordinator field sources, ages, TTLs and
 pending writes. It also works in Local-only without issuing SmartThings requests;
-cloud-only diagnostic sections are omitted in that mode. Advanced Audio switches
-remain optimistic when the device does not provide readable cloud state.
+cloud-only diagnostic sections are omitted in that mode. Legacy Cloud Advanced
+Audio switches can remain optimistic without readable Cloud state; verified OCF
+switches use authoritative local readback instead.
 
 Cloud status respects explicit `custom.disabledComponents` and
 `custom.disabledCapabilities` lists. Missing/null optional metadata does not

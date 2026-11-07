@@ -8,14 +8,14 @@ import io
 import logging
 from dataclasses import dataclass
 from functools import partial
-from time import monotonic
+from time import monotonic, sleep
 from types import SimpleNamespace
 from uuid import UUID
 
 import cbor2
 
 from .ocf_credentials import OcfCredential, async_complete
-from .ocf_profiles import Q800F_WOOFER, validate_woofer_level
+from .ocf_profiles import Q800F_AUDIO_SWITCHES, Q800F_WOOFER, validate_woofer_level
 
 _BASE = "/sec/networkaudio/"
 READ_HREFS = frozenset(
@@ -259,12 +259,27 @@ class LocalSoundbarOcfClient:
         match = None
         if acknowledged or ambiguous:
             try:
-                readback = self._read(href)
-                match = all(
-                    type(readback.get(key)) is type(value)
-                    and readback.get(key) == value
-                    for key, value in payload.items()
-                )
+                deadline = monotonic() + 5
+                for attempt in range(16):
+                    readback = self._read(href)
+                    typed = all(
+                        type(readback.get(key)) is type(value)
+                        for key, value in payload.items()
+                    )
+                    match = typed and all(
+                        readback[key] == value for key, value in payload.items()
+                    )
+                    if (
+                        match
+                        or not typed
+                        or attempt == 15
+                        or getattr(self, "_cancel_requested", False)
+                    ):
+                        break
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        break
+                    sleep(min(0.35, remaining))
             except Exception:  # noqa: BLE001 - failed readback does not authorize a replay
                 _LOGGER.debug("OCF write readback unavailable")
                 self.last_error = "transport"
@@ -345,9 +360,24 @@ class LocalSoundbarOcfClient:
             self._ready()
             return await self._run(partial(self._read, href))
 
-    async def async_write(self, href, payload, *, woofer_profile=None):
+    async def async_write(
+        self, href, payload, *, woofer_profile=None, switch_profile=None
+    ):
         # Wider writes need the model-scoped profile granted by the verified route.
-        if (
+        switch_write = any(
+            switch_profile is item for item in Q800F_AUDIO_SWITCHES.values()
+        )
+        if switch_write:
+            valid = (
+                href == switch_profile.href
+                and isinstance(payload, dict)
+                and set(payload) == {switch_profile.property}
+                and type(payload[switch_profile.property]) is int
+                and payload[switch_profile.property] in (0, 1)
+            )
+            if not valid:
+                raise OcfError("unverified")
+        elif (
             href != _WOOFER
             or not isinstance(payload, dict)
             or set(payload) != {_FIELD}
@@ -355,10 +385,11 @@ class LocalSoundbarOcfClient:
             or (woofer_profile is not Q800F_WOOFER and payload[_FIELD] not in (0, 1))
         ):
             raise OcfError("unverified")
-        try:
-            validate_woofer_level(payload[_FIELD])
-        except ValueError:
-            raise OcfError("unverified") from None
+        if not switch_write:
+            try:
+                validate_woofer_level(payload[_FIELD])
+            except ValueError:
+                raise OcfError("unverified") from None
         payload = dict(payload)
         async with self._lock:
             self._ready()

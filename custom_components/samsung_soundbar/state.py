@@ -104,6 +104,11 @@ class SoundbarState:
             if not authoritative:
                 continue
             self.write_only.pop(key, None)
+            if source == "ocf" and self.write_sources.get(key) == "cloud":
+                # Fresh authenticated OCF evidence outranks an earlier Cloud
+                # command's optimism, even before its settling interval expires.
+                self.pending.pop(key, None)
+                pending = None
             if pending is not None and pending.value == value and authoritative:
                 self.pending.pop(key)
                 self.write_only.pop(key, None)
@@ -127,6 +132,15 @@ class SoundbarState:
             self.write_only.pop(key, None)
             if write_only:
                 self.write_only[key] = FieldValue(value, "optimistic", now, None)
+
+    def begin_write(self, fields, *, source):
+        """Supersede older command guards without inventing a new field value."""
+        now = self.clock()
+        for key in fields:
+            self.written_at[key] = now
+            self.write_sources[key] = source
+            self.pending.pop(key, None)
+            self.write_only.pop(key, None)
 
     def discard_cloud_fields(self, fields: set[str]):
         """Remove explicitly disabled Cloud state without discarding LAN writes."""

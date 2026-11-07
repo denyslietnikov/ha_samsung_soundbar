@@ -322,7 +322,14 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             raise OcfError("malformed")
 
     async def async_write_ocf(
-        self, href, payload, *, woofer_profile=None, guard=None, required_fields=()
+        self,
+        href,
+        payload,
+        *,
+        woofer_profile=None,
+        switch_profile=None,
+        guard=None,
+        required_fields=(),
     ):
         """Internal verified-route command; never an arbitrary public POST action."""
         if self.ocf is None or not self.state.use_ocf or href not in RESOURCE_FIELDS:
@@ -334,7 +341,15 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
                 if guard is not None:
                     await self._read_required_ocf_fields(href, required_fields)
                     guard()
-                if woofer_profile is None:
+                if isinstance(payload, dict):
+                    self.state.begin_write(
+                        project_ocf(href, payload).values, source="ocf"
+                    )
+                if switch_profile is not None:
+                    result = await self.ocf.async_write(
+                        href, payload, switch_profile=switch_profile
+                    )
+                elif woofer_profile is None:
                     result = await self.ocf.async_write(href, payload)
                 else:
                     result = await self.ocf.async_write(

@@ -9,6 +9,7 @@ from homeassistant.helpers.entity import Entity
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .models import SoundbarConfigEntry
+from .ocf_profiles import Q800F_AUDIO_SWITCHES
 
 
 def register_device_update_listener(
@@ -21,6 +22,9 @@ def register_device_update_listener(
     coordinator = device.coordinator
 
     def available_for(entity):
+        audio_field = getattr(entity, "_soundbar_audio_field", None)
+        if isinstance(audio_field, str) and audio_field in Q800F_AUDIO_SWITCHES:
+            return device.audio_switch_available(audio_field)
         if getattr(entity, "_soundbar_woofer_absolute", False) is True:
             return device.woofer_control_available
         if getattr(entity, "_soundbar_woofer_relative", False) is True and device.ocf_woofer_profile is not None:

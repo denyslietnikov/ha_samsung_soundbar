@@ -226,6 +226,37 @@ class TestLocalOcf(IsolatedAsyncioTestCase):
         result = await self.client.async_write(WOOFER, {FIELD: 0})
         self.assertFalse(result.readback_matches)
 
+    async def test_delayed_virtual_readback_polls_get_without_repeating_post(self):
+        from custom_components.samsung_soundbar.ocf_profiles import Q800F_AUDIO_SWITCHES
+
+        profile = Q800F_AUDIO_SWITCHES["virtual_sound"]
+        await self.client.async_connect()
+        self.session.get.side_effect = [
+            (69, cbor2.dumps({profile.property: 1})),
+            (69, cbor2.dumps({profile.property: 0})),
+        ]
+        with patch.object(self.module, "sleep", return_value=None, create=True):
+            result = await self.client.async_write(
+                profile.href, {profile.property: 0}, switch_profile=profile
+            )
+        self.assertTrue(result.readback_matches)
+        self.session.post.assert_called_once()
+
+    async def test_audio_profile_rejects_multi_field_bool_or_wrong_case_payload(self):
+        from custom_components.samsung_soundbar.ocf_profiles import Q800F_AUDIO_SWITCHES
+
+        profile = Q800F_AUDIO_SWITCHES["moderate_bass"]
+        for payload in (
+            {profile.property: True},
+            {profile.property: 1, "nightmode": 0},
+            {"x.com.samsung.networkaudio.moderateBass": 1},
+        ):
+            with self.assertRaises(self.module.OcfError):
+                await self.client.async_write(
+                    profile.href, payload, switch_profile=profile
+                )
+        self.session.post.assert_not_called()
+
     async def test_cancelled_error_cleanup_keeps_peer_serialized(self):
         started, release = threading.Event(), threading.Event()
 

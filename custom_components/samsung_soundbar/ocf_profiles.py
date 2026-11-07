@@ -26,3 +26,88 @@ class WooferProfile:
 # the earlier 0/+1 probe and the -7 probe establish a continuous integer scale.
 # This is not an exhaustive step scan or a claim about other soundbar models.
 Q800F_WOOFER = WooferProfile("HW-Q800F", "22_AV_HW-Q800F")
+
+
+@dataclass(frozen=True)
+class AudioSwitchProfile:
+    field: str
+    href: str
+    property: str
+    suffix: str
+    getter: str
+    setter: str
+    name: str
+    icon: str
+
+
+_BASE = "/sec/networkaudio/"
+_PREFIX = "x.com.samsung.networkaudio."
+# Exact integer 0/1 single-property writes, probed on Q800F/1103.1.
+Q800F_AUDIO_SWITCHES = {
+    item.field: item
+    for item in (
+        AudioSwitchProfile(
+            "night_mode",
+            _BASE + "advancedaudio",
+            _PREFIX + "nightmode",
+            "nightmode",
+            "night_mode",
+            "set_night_mode",
+            "Nightmode",
+            "mdi:weather-night",
+        ),
+        AudioSwitchProfile(
+            "bass_mode",
+            _BASE + "advancedaudio",
+            _PREFIX + "bassboost",
+            "bassmode",
+            "bass_mode",
+            "set_bass_mode",
+            "Bassmode",
+            "mdi:speaker-wireless",
+        ),
+        AudioSwitchProfile(
+            "voice_amplifier",
+            _BASE + "advancedaudio",
+            _PREFIX + "voiceamplifier",
+            "voice_amplifier",
+            "voice_amplifier",
+            "set_voice_amplifier",
+            "Voice Amplifier",
+            "mdi:account-voice",
+        ),
+        AudioSwitchProfile(
+            "virtual_sound",
+            _BASE + "advancedaudio",
+            _PREFIX + "virtual",
+            "virtual",
+            "virtual_sound",
+            "set_virtual_sound",
+            "Virtual",
+            "mdi:surround-sound",
+        ),
+        AudioSwitchProfile(
+            "moderate_bass",
+            _BASE + "advancedaudio",
+            _PREFIX + "moderatebass",
+            "moderate_bass",
+            "moderate_bass",
+            "set_moderate_bass",
+            "Moderate Bass",
+            "mdi:volume-low",
+        ),
+        AudioSwitchProfile(
+            "spacefit_sound",
+            _BASE + "spacefitSound",
+            _PREFIX + "spacefitSound",
+            "space_fit_sound",
+            "space_fit_sound",
+            "set_space_fit_sound",
+            "SpaceFit Sound",
+            "mdi:surround-sound",
+        ),
+    )
+}
+LEGACY_AUDIO_SWITCH_FIELDS = frozenset(
+    {"night_mode", "bass_mode", "voice_amplifier", "virtual_sound"}
+)

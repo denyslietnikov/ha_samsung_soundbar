@@ -8,14 +8,12 @@ from .api_extension.SoundbarDevice import SoundbarDevice
 from .device_info import build_device_info
 from .entity_updates import register_device_update_listener
 from .models import SoundbarConfigEntry
+from .ocf_profiles import Q800F_AUDIO_SWITCHES
 
 _LOGGER = logging.getLogger(__name__)
 
 SWITCH_ENTITY_NAMES = {
-    "bassmode": "Bassmode",
-    "nightmode": "Nightmode",
-    "voice_amplifier": "Voice Amplifier",
-    "virtual": "Virtual",
+    profile.suffix: profile.name for profile in Q800F_AUDIO_SWITCHES.values()
 }
 
 
@@ -25,50 +23,33 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     device = config_entry.runtime_data.device
-    entities = []
-    if device.can_control_advanced_audio:
-        entities.append(
-            SoundbarSwitchAdvancedAudio(
-                device,
-                "nightmode",
-                lambda: device.night_mode,
-                device.set_night_mode,
-                device.set_night_mode,
-                "mdi:weather-night",
+    added = set()
+
+    def discover():
+        entities = []
+        for field, profile in Q800F_AUDIO_SWITCHES.items():
+            if field in added or not device.can_control_audio_switch(field):
+                continue
+            added.add(field)
+            entities.append(
+                SoundbarSwitchAdvancedAudio(
+                    device,
+                    profile.suffix,
+                    lambda getter=profile.getter: getattr(device, getter),
+                    getattr(device, profile.setter),
+                    getattr(device, profile.setter),
+                    profile.icon,
+                    field=field,
+                )
             )
-        )
-        entities.append(
-            SoundbarSwitchAdvancedAudio(
-                device,
-                "bassmode",
-                lambda: device.bass_mode,
-                device.set_bass_mode,
-                device.set_bass_mode,
-                "mdi:speaker-wireless",
-            )
-        )
-        entities.append(
-            SoundbarSwitchAdvancedAudio(
-                device,
-                "voice_amplifier",
-                lambda: device.voice_amplifier,
-                device.set_voice_amplifier,
-                device.set_voice_amplifier,
-                "mdi:account-voice",
-            )
-        )
-        entities.append(
-            SoundbarSwitchAdvancedAudio(
-                device,
-                "virtual",
-                lambda: device.virtual_sound,
-                device.set_virtual_sound,
-                device.set_virtual_sound,
-                "mdi:surround-sound",
-            )
-        )
-        register_device_update_listener(config_entry, device, entities)
-    async_add_entities(entities)
+        if entities:
+            register_device_update_listener(config_entry, device, entities)
+            async_add_entities(entities)
+
+    discover()
+    if not added:
+        async_add_entities([])
+    config_entry.async_on_unload(device.add_update_listener(discover))
 
 
 class SoundbarSwitchAdvancedAudio(SwitchEntity):
@@ -83,7 +64,17 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
         on_function,
         off_function,
         icon_string: str = "mdi:toggle-switch-variant",
+        *,
+        field: str | None = None,
     ):
+        self._soundbar_audio_field = field or next(
+            (
+                item.field
+                for item in Q800F_AUDIO_SWITCHES.values()
+                if item.suffix == append_unique_id
+            ),
+            None,
+        )
         self.__device = device
         display_name = SWITCH_ENTITY_NAMES.get(append_unique_id, append_unique_id)
         self._name = f"{self.__device.device_name} {display_name}"

@@ -42,6 +42,8 @@ from ..local_rpc import (
     split_local_readback,
 )
 from ..ocf_profiles import (
+    LEGACY_AUDIO_SWITCH_FIELDS,
+    Q800F_AUDIO_SWITCHES,
     Q800F_WOOFER,
     WOOFER_FIELD,
     WOOFER_HREF,
@@ -207,6 +209,7 @@ class SoundbarDevice:
         self.device = device
         self.coordinator = None
         self.__ocf_woofer_profile = None
+        self.__ocf_audio_profiles = {}
         self.cloud_setup_pending = False
         self._device_id = self.device.device_id
         self.__auth_provider = auth_provider
@@ -1629,6 +1632,109 @@ class SoundbarDevice:
     def has_advanced_audio_state(self) -> bool:
         return self.__advanced_audio_supported
 
+    def ocf_audio_profile(self, field):
+        profile = Q800F_AUDIO_SWITCHES.get(field)
+        coordinator = self.coordinator
+        if (
+            profile is None
+            or coordinator is None
+            or not coordinator.state.use_ocf
+            or coordinator.ocf is None
+        ):
+            return None
+        if field in self.__ocf_audio_profiles:
+            return self.__ocf_audio_profiles[field]
+        if coordinator.ocf.validated is not True or not (
+            self.model == Q800F_WOOFER.model
+            or self.local_identifier == Q800F_WOOFER.rpc_identifier
+        ):
+            return None
+        record = coordinator.state.records["ocf"].get(field)
+        if (
+            record is None
+            or type(record.value) is not bool
+            or record.observed_at
+            < coordinator.state.written_at.get(field, float("-inf"))
+        ):
+            return None
+        self.__ocf_audio_profiles[field] = profile
+        return profile
+
+    def can_control_audio_switch(self, field):
+        return self.ocf_audio_profile(field) is not None or (
+            field in LEGACY_AUDIO_SWITCH_FIELDS and self.can_control_advanced_audio
+        )
+
+    def audio_switch_available(self, field):
+        if self.ocf_audio_profile(field) is not None:
+            coordinator = self.coordinator
+            power = coordinator.state.resolve("power")
+            return bool(
+                coordinator.ocf_field_available(field)
+                and type(coordinator.state.records["ocf"][field].value) is bool
+                and coordinator.state.snapshot().local_available
+                and power is not None
+                and power.source == "rpc"
+                and power.value == "on"
+            )
+        return (
+            field in LEGACY_AUDIO_SWITCH_FIELDS
+            and self.can_control_advanced_audio
+            and self.cloud_available
+        )
+
+    def require_ocf_audio_available(self, field):
+        if self.ocf_audio_profile(field) is None or not self.audio_switch_available(
+            field
+        ):
+            raise HomeAssistantError(
+                "Local audio setting is unavailable; check power and OCF readback"
+            )
+
+    async def __set_audio_setting(self, field, enabled):
+        if type(enabled) is not bool:
+            raise HomeAssistantError("Audio setting must be a boolean")
+        profile = self.ocf_audio_profile(field)
+        if profile is not None:
+            self.require_ocf_audio_available(field)
+            try:
+                result = await self.coordinator.async_write_ocf(
+                    profile.href,
+                    {profile.property: int(enabled)},
+                    switch_profile=profile,
+                    guard=lambda: self.require_ocf_audio_available(field),
+                    required_fields=(field,),
+                )
+            except OcfError as error:
+                raise HomeAssistantError(
+                    f"Local audio write failed ({error.kind}); no fallback was attempted"
+                ) from None
+            if (
+                result.readback_matches is not True
+                or not self.audio_switch_available(field)
+                or self.coordinator.state.records["ocf"][field].value is not enabled
+            ):
+                raise HomeAssistantError(
+                    "Local audio write was not confirmed; no retry was attempted"
+                )
+            return
+        if self.local_only or field == "moderate_bass":
+            raise HomeAssistantError(
+                "A verified local audio profile and OCF credential are required"
+            )
+        await self.__set_cloud_audio_setting(field, enabled)
+
+    @coordinated_command(lambda self, field, enabled: {field: enabled}, cloud_only=True)
+    async def __set_cloud_audio_setting(self, field, enabled):
+        if self.ocf_audio_profile(field) is not None:
+            raise HomeAssistantError(
+                "Audio route changed while queued; retry with the local control"
+            )
+        profile = Q800F_AUDIO_SWITCHES[field]
+        await self.set_custom_execution_data(
+            href=profile.href, property=profile.property, value=int(enabled)
+        )
+
     # ------------ ON / OFF ------------
 
     @property
@@ -2099,13 +2205,8 @@ class SoundbarDevice:
             return self.__coordinated_value("night_mode", False)
         return True if self.__night_mode == 1 else False
 
-    @coordinated_command(lambda self, value: {"night_mode": value}, cloud_only=True)
     async def set_night_mode(self, value: bool):
-        await self.set_custom_execution_data(
-            href="/sec/networkaudio/advancedaudio",
-            property="x.com.samsung.networkaudio.nightmode",
-            value=1 if value else 0,
-        )
+        await self.__set_audio_setting("night_mode", value)
         self.__night_mode = 1 if value else 0
 
     @property
@@ -2114,13 +2215,8 @@ class SoundbarDevice:
             return self.__coordinated_value("bass_mode", False)
         return True if self.__bass_mode == 1 else False
 
-    @coordinated_command(lambda self, value: {"bass_mode": value}, cloud_only=True)
     async def set_bass_mode(self, value: bool):
-        await self.set_custom_execution_data(
-            href="/sec/networkaudio/advancedaudio",
-            property="x.com.samsung.networkaudio.bassboost",
-            value=1 if value else 0,
-        )
+        await self.__set_audio_setting("bass_mode", value)
         self.__bass_mode = 1 if value else 0
 
     @property
@@ -2129,15 +2225,8 @@ class SoundbarDevice:
             return self.__coordinated_value("voice_amplifier", False)
         return True if self.__voice_amplifier == 1 else False
 
-    @coordinated_command(
-        lambda self, value: {"voice_amplifier": value}, cloud_only=True
-    )
     async def set_voice_amplifier(self, value: bool):
-        await self.set_custom_execution_data(
-            href="/sec/networkaudio/advancedaudio",
-            property="x.com.samsung.networkaudio.voiceamplifier",
-            value=1 if value else 0,
-        )
+        await self.__set_audio_setting("voice_amplifier", value)
         self.__voice_amplifier = 1 if value else 0
 
     @property
@@ -2146,14 +2235,28 @@ class SoundbarDevice:
             return self.__coordinated_value("virtual_sound", False)
         return True if self.__virtual_sound == 1 else False
 
-    @coordinated_command(lambda self, value: {"virtual_sound": value}, cloud_only=True)
     async def set_virtual_sound(self, value: bool):
-        await self.set_custom_execution_data(
-            href="/sec/networkaudio/advancedaudio",
-            property="x.com.samsung.networkaudio.virtual",
-            value=1 if value else 0,
-        )
+        await self.__set_audio_setting("virtual_sound", value)
         self.__virtual_sound = 1 if value else 0
+
+    @property
+    def moderate_bass(self) -> bool | None:
+        return (
+            self.__coordinated_value("moderate_bass")
+            if self.coordinator is not None
+            else None
+        )
+
+    async def set_moderate_bass(self, value: bool):
+        await self.__set_audio_setting("moderate_bass", value)
+
+    @property
+    def space_fit_sound(self) -> bool | None:
+        return (
+            self.__coordinated_value("spacefit_sound")
+            if self.coordinator is not None
+            else None
+        )
 
     # ------------ EQUALIZER --------------
 
@@ -2314,11 +2417,7 @@ class SoundbarDevice:
         )
 
     async def set_space_fit_sound(self, enabled: bool):
-        await self.set_custom_execution_data(
-            href="/sec/networkaudio/spacefitSound",
-            property="x.com.samsung.networkaudio.spacefitSound",
-            value=1 if enabled else 0
-        )
+        await self.__set_audio_setting("spacefit_sound", enabled)
 
     # ------------ SUPPORT FUNCTIONS ------------
 
@@ -3082,6 +3181,8 @@ class SoundbarDevice:
                 "bass_mode": self.bass_mode,
                 "voice_amplifier": self.voice_amplifier,
                 "virtual": self.virtual_sound,
+                "moderate_bass": self.moderate_bass,
+                "spacefit_sound": self.space_fit_sound,
             },
             "equalizer": {
                 "active_preset": self.active_equalizer_preset,

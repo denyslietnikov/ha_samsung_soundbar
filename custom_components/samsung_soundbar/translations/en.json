@@ -142,7 +142,7 @@
             },
             "reconfigure_confirm": {
                 "data": {
-                    "settings_advanced_audio": "Enable 'Advanced Audio switches' capabilities (NightMode, BassMode, VoiceEnhancer, Virtual)",
+                    "settings_advanced_audio": "Enable optional Cloud Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier, Virtual)",
                     "settings_eq": "Enable 'EQ selector' capabilities",
                     "settings_soundmode": "Enable 'Soundmode selector' capabilities",
                     "settings_woofer": "Enable optional Cloud Woofer number entity",
@@ -214,7 +214,7 @@
                     "local_verify_ssl": "Verify local SSL certificate",
                     "local_timeout": "Local RPC timeout",
                     "local_fallback_to_cloud": "Fallback to SmartThings Cloud when local RPC fails",
-                    "settings_advanced_audio": "Enable Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier, Virtual)",
+                    "settings_advanced_audio": "Enable optional Cloud Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier, Virtual)",
                     "settings_eq": "Enable EQ selector",
                     "settings_soundmode": "Enable Sound Mode selector",
                     "settings_woofer": "Enable optional Cloud Woofer number entity",
