@@ -25,6 +25,7 @@ from ..local_rpc import (
     split_local_readback,
 )
 from ..ocf_equalizer import OcfEqualizer
+from ..ocf_levels import OcfLevels
 from ..ocf_profiles import (
     Q800F_AUDIO_SWITCHES,
     Q800F_TONE,
@@ -145,6 +146,7 @@ class SoundbarDevice:
         self.__ocf_audio_profiles = {}
         self.__ocf_tone_profiles = {}
         self.ocf_equalizer = OcfEqualizer(self)
+        self.ocf_levels = OcfLevels(self)
         self.__local_status = {}
         self.__local_status_updated_at = None
         self.__local_status_update_lock = asyncio.Lock()
@@ -277,6 +279,18 @@ class SoundbarDevice:
 
     def can_control_audio_switch(self, field):
         return self.ocf_audio_profile(field) is not None
+
+    def ocf_level_profile(self, field):
+        return self.ocf_levels.profile(field)
+
+    def ocf_level_value(self, field):
+        return self.ocf_levels.value(field)
+
+    def ocf_level_available(self, field):
+        return self.ocf_levels.available(field)
+
+    async def set_ocf_level(self, field, value):
+        await self.ocf_levels.async_set(field, value)
 
     @property
     def state(self):

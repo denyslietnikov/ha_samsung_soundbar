@@ -22,6 +22,9 @@ def register_device_update_listener(
     coordinator = device.coordinator
 
     def available_for(entity):
+        level_field = getattr(entity, "_soundbar_level_field", None)
+        if isinstance(level_field, str):
+            return device.ocf_level_available(level_field)
         tone_field = getattr(entity, "_soundbar_tone_field", None)
         if isinstance(tone_field, str):
             return device.tone_control_available(tone_field)

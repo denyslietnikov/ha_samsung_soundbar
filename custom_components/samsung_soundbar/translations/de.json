@@ -1,5 +1,14 @@
 {
     "exceptions": {
+        "ocf_level_invalid": {
+            "message": "Wählen Sie eine ganze Zahl innerhalb des Wertebereichs dieser Steuerung."
+        },
+        "ocf_level_unavailable": {
+            "message": "Diese lokale Audiosteuerung ist nicht verfügbar. Prüfen Sie den Betriebszustand, die Kanalunterstützung und die OCF-Rückmeldung."
+        },
+        "ocf_level_unconfirmed": {
+            "message": "Die lokale Audiopegeländerung wurde nicht bestätigt. Kein erneuter Versuch oder Fallback wurde ausgeführt."
+        },
         "ocf_eq_invalid": {
             "message": "Wählen Sie einen unterstützten EQ-Preset mit seinem genauen Namen."
         },
@@ -32,6 +41,24 @@
             }
         },
         "number": {
+            "channel_level_center": {
+                "name": "Kanäle: Center"
+            },
+            "channel_level_side": {
+                "name": "Kanäle: Seite"
+            },
+            "channel_level_frontTop": {
+                "name": "Kanäle: Vorne oben"
+            },
+            "channel_level_rear": {
+                "name": "Kanäle: Hinten"
+            },
+            "channel_level_rearTop": {
+                "name": "Kanäle: Hinten oben"
+            },
+            "audio_sync": {
+                "name": "Klang: Audio-Synchronisierung"
+            },
             "bass_level": {
                 "name": "Ton: Bass"
             },

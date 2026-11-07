@@ -1,5 +1,14 @@
 {
     "exceptions": {
+        "ocf_level_invalid": {
+            "message": "Choose a whole number within this control's range."
+        },
+        "ocf_level_unavailable": {
+            "message": "This local audio control is unavailable. Check soundbar power, channel support and OCF readback."
+        },
+        "ocf_level_unconfirmed": {
+            "message": "The local audio level change was not confirmed. No retry or fallback was attempted."
+        },
         "ocf_eq_invalid": {
             "message": "Choose a supported EQ preset using its exact name."
         },
@@ -32,6 +41,24 @@
             }
         },
         "number": {
+            "channel_level_center": {
+                "name": "Channels: Center"
+            },
+            "channel_level_side": {
+                "name": "Channels: Side"
+            },
+            "channel_level_frontTop": {
+                "name": "Channels: Front Top"
+            },
+            "channel_level_rear": {
+                "name": "Channels: Rear"
+            },
+            "channel_level_rearTop": {
+                "name": "Channels: Rear Top"
+            },
+            "audio_sync": {
+                "name": "Sound: Audio Sync"
+            },
             "bass_level": {
                 "name": "Tone: Bass"
             },

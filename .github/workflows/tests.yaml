@@ -72,3 +72,8 @@ jobs:
           tests/test_ocf_equalizer.py
           tests/test_ocf_eq_controls.py
           custom_components/samsung_soundbar/ocf_equalizer.py
+          custom_components/samsung_soundbar/ocf_channels.py
+          custom_components/samsung_soundbar/ocf_level_profiles.py
+          custom_components/samsung_soundbar/ocf_levels.py
+          tests/test_ocf_channel_schema.py tests/test_ocf_level_transport.py
+          tests/test_ocf_levels.py

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import io
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from time import monotonic, sleep
@@ -14,7 +15,9 @@ from uuid import UUID
 
 import cbor2
 
+from .ocf_channels import parse_channel_volume
 from .ocf_credentials import OcfCredential, async_complete
+from .ocf_level_profiles import PREFIX, valid_level_payload, validate_level
 from .ocf_profiles import (
     Q800F_AUDIO_SWITCHES,
     Q800F_EQ,
@@ -124,6 +127,55 @@ def _decode(body):
         return value
     except (cbor2.CBORDecodeError, ValueError, TypeError, RecursionError):
         raise OcfError("malformed") from None
+
+
+def _typed_equal(left, right):
+    """CBOR booleans must never confirm an integer setting."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _typed_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _typed_equal(a, b) for a, b in zip(left, right, strict=True)
+        )
+    return left == right
+
+
+def _level_readback(profile, payload, before):
+    """Build the expected full GET without sending adjacent channel values."""
+    if (
+        type(before.get(PREFIX + "isSupported")) is not int
+        or before[PREFIX + "isSupported"] != 1
+    ):
+        raise OcfError("unsupported")
+    expected = deepcopy(before)
+    if profile.wire_name is None:
+        current = before.get(profile.property)
+        if type(current) is not int:
+            raise OcfError("malformed")
+        value = payload[profile.property]
+        expected[profile.property] = value
+    else:
+        parsed = parse_channel_volume(before).values
+        status = parsed.get(profile.field.replace("channel_level_", "channel_status_"))
+        if (
+            parsed.get("channel_schema_valid") is not True
+            or type(status) is not int
+            or status != 1
+        ):
+            raise OcfError("unsupported")
+        current = parsed.get(profile.field)
+        for row in expected[profile.property]:
+            if row["name"] == profile.wire_name:
+                row["value"] = payload[profile.property][0]["value"]
+    try:
+        validate_level(profile, current)
+    except ValueError:
+        raise OcfError("malformed") from None
+    return expected
 
 
 class _PrivateProtocolLogs(logging.Filter):
@@ -253,8 +305,15 @@ class LocalSoundbarOcfClient:
             raise OcfError("permission" if code in (129, 131) else "unsupported")
         return _decode(body)
 
-    def _write(self, href, payload):
+    def _write(self, href, payload, setting_profile=None):
         self._connect()
+        expected = (
+            _level_readback(setting_profile, payload, self._read(href))
+            if setting_profile is not None
+            else None
+        )
+        if getattr(self, "_cancel_requested", False):
+            raise OcfError("closed")
         code, ambiguous = None, False
         try:
             code, _ = self._session.post(
@@ -276,6 +335,8 @@ class LocalSoundbarOcfClient:
                     match = typed and all(
                         readback[key] == value for key, value in payload.items()
                     )
+                    if expected is not None:
+                        match = _typed_equal(readback, expected)
                     if (
                         match
                         or not typed
@@ -376,6 +437,7 @@ class LocalSoundbarOcfClient:
         switch_profile=None,
         tone_profile=None,
         eq_profile=None,
+        setting_profile=None,
     ):
         # Wider writes need the model-scoped profile granted by the verified route.
         switch_write = any(
@@ -383,7 +445,14 @@ class LocalSoundbarOcfClient:
         )
         tone_write = tone_profile is not None
         eq_write = eq_profile is not None
-        if eq_write:
+        setting_write = setting_profile is not None
+        if setting_write:
+            if any(
+                item is not None
+                for item in (woofer_profile, switch_profile, tone_profile, eq_profile)
+            ) or not valid_level_payload(setting_profile, href, payload):
+                raise OcfError("unverified")
+        elif eq_write:
             if (
                 eq_profile is not Q800F_EQ
                 or href != Q800F_EQ.href
@@ -427,15 +496,15 @@ class LocalSoundbarOcfClient:
             or (woofer_profile is not Q800F_WOOFER and payload[_FIELD] not in (0, 1))
         ):
             raise OcfError("unverified")
-        if not switch_write and not tone_write and not eq_write:
+        if not switch_write and not tone_write and not eq_write and not setting_write:
             try:
                 validate_woofer_level(payload[_FIELD])
             except ValueError:
                 raise OcfError("unverified") from None
-        payload = dict(payload)
+        payload = deepcopy(payload)
         async with self._lock:
             self._ready()
-            return await self._run(partial(self._write, href, payload))
+            return await self._run(partial(self._write, href, payload, setting_profile))
 
     async def async_validate_candidate(self, credential):
         async with self._lock:

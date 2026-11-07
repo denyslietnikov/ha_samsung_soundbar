@@ -155,29 +155,31 @@ class TestOcfCoordinator(IsolatedAsyncioTestCase):
         self.assertTrue(device.local_available)
         self.assertIsNone(device.virtual_sound)
 
-    async def test_channel_support_and_omission_do_not_refresh_other_channel_age(self):
+    async def test_authoritative_channel_get_revokes_omitted_or_unsupported_rows(self):
         _device, coordinator = self.make_device(CONTROL_MODE_HYBRID_LOCAL_OCF)
         self.attach_ocf(coordinator)
         href = BASE + "channelVolume"
         self.payloads[href] = {
+            PREFIX + "isSupported": 1,
             PREFIX + "channelVolume": [
-                {"name": "center", "value": 1, "status": 1},
-                {"name": "rear", "value": 2, "status": 1},
-            ]
+                {"name": "Spk_Center", "value": 1, "status": 1},
+                {"name": "Spk_Rear", "value": 2, "status": 1},
+            ],
         }
         await coordinator.async_refresh_all()
         self.assertEqual(coordinator.state.value("channel_level_rear"), 2)
         self.now = 40
         self.payloads[href] = {
+            PREFIX + "isSupported": 1,
             PREFIX + "channelVolume": [
-                {"name": "center", "value": 3, "status": 0},
-            ]
+                {"name": "Spk_Center", "value": 3, "status": 0},
+            ],
         }
         await coordinator.async_refresh_all()
         self.assertIsNone(coordinator.state.value("channel_level_center"))
-        self.assertEqual(
-            coordinator.state.diagnostics()["channel_level_rear"]["age_seconds"], 39
-        )
+        self.assertIsNone(coordinator.state.value("channel_level_rear"))
+        self.assertFalse(coordinator.ocf_field_available("channel_level_rear"))
+        self.assertEqual(coordinator.state.value("channel_status_center"), 0)
 
     async def test_omitted_or_malformed_settings_never_become_false_or_fresh(self):
         device, coordinator = self.make_device(CONTROL_MODE_HYBRID_LOCAL_OCF)

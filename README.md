@@ -81,13 +81,15 @@ still need field-testing.
 | Volume and Sound From sensors | Local values when available | Same local values |
 | Tone: Woofer | Not exposed | Validated Q800F OCF profile, -12 to +6 dB, step 1 |
 | Tone: Bass / Treble | Not exposed | Independently validated OCF profiles, -6 to +6, step 1 |
+| Channels: Center / Side / Front Top / Rear / Rear Top | Not exposed | Independent Q800F OCF sliders, -6 to +6, step 1, only while that channel reports available |
+| Sound: Audio Sync | Not exposed | Q800F OCF delay, 0 to 300 ms, step 25 |
 | Sound: Night Mode, Bass Boost, Voice Amplifier, Virtual, Moderate Bass, SpaceFit Sound | Not exposed | Discovered independently after validated OCF readback |
 | EQ Preset / seven-band EQ UI | Not exposed | Not exposed; backend diagnostics only |
 
 Advanced audio controls are discovered at startup or later when local profiles
 become available. Their existing IDs are reused. Once discovered, an outage makes
 them unavailable instead of removing/recreating them. A missing field does not
-disable its neighbors. Names use the native translated Sound/Source/Tone groups;
+disable its neighbors. Names use the native translated Sound/Source/Tone/Channels groups;
 user-customized names take precedence.
 
 OCF writes run through guarded device methods: check fresh RPC power and target
@@ -102,7 +104,17 @@ Bass and Treble samples -6/-1/+1/+6 in Surround, and individual audio-switch
 write/readback. Those are bounded protocol results, not proof of every mode,
 firmware or installed-HA UI behavior. Field verification remains necessary.
 
-Playback play/pause/stop/next/previous, individual speaker channel levels, rear
+Channel probes confirmed Center -6/+1/+6, Side and Front Top 0/+1, Rear 4/5,
+and Rear Top 6/5 with GET confirmation, unchanged neighboring settings and
+restoration. Wide and Rear Side reported unsupported and are not exposed.
+Writes send only the chosen channel's name/value pair, never a stale full list.
+Audio Sync probes confirmed 0/25/300; a request for 1 read back as 25, so the
+slider uses 25 ms steps. Channel ranges and the 0-300 ms delay scale match the
+[Samsung Q800F user guide](https://gzhls.at/blob/ldb/8/8/7/8/5f457b7a59940d87ca7e8c5745233951889e.pdf),
+English pages 5-6. These probes did not change power or Sound Mode. External
+changes are read by the normal OCF sweep, not RPC's faster core polling.
+
+Playback play/pause/stop/next/previous, legacy channel-control actions, rear
 speaker mode and Active Voice Amplifier controls are removed. Their integration
 actions are no longer registered. Media title, artist, duration, position and
 artwork remain unknown (`None`); no placeholder artwork or invented metadata

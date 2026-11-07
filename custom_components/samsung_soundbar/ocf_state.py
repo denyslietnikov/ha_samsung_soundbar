@@ -2,23 +2,11 @@
 
 from dataclasses import dataclass
 
+from .ocf_channels import CHANNEL_NAMES, parse_channel_volume
 from .ocf_profiles import parse_eq_metadata
 
 BASE = "/sec/networkaudio/"
 PREFIX = "x.com.samsung.networkaudio."
-CHANNEL_NAMES = frozenset(
-    {
-        "center",
-        "side",
-        "wide",
-        "front",
-        "rear",
-        "rearSide",
-        "rearTop",
-        "frontTop",
-        "top",
-    }
-)
 RESOURCE_FIELDS = {
     BASE + "woofer": {"woofer_level", "woofer_connection"},
     BASE + "advancedaudio": {
@@ -38,8 +26,12 @@ RESOURCE_FIELDS = {
         "equalizer_schema_valid",
     },
     BASE + "currentEQMode": {"current_equalizer_mode"},
-    BASE + "channelVolume": {"channel_level_" + name for name in CHANNEL_NAMES},
-    BASE + "audiosync": {"audio_sync"},
+    BASE + "channelVolume": {
+        "channel_schema_valid",
+        *("channel_level_" + name for name in CHANNEL_NAMES),
+        *("channel_status_" + name for name in CHANNEL_NAMES),
+    },
+    BASE + "audiosync": {"audio_sync", "audio_sync_supported"},
 }
 OCF_FIELDS = frozenset().union(*RESOURCE_FIELDS.values())
 POLL_HREFS = tuple(RESOURCE_FIELDS)
@@ -52,20 +44,41 @@ class OcfProjection:
     invalidated: tuple[str, ...] = ()
 
 
+def _resource_support(payload):
+    supported = payload.get(PREFIX + "isSupported", payload.get("isSupported"))
+    return bool(supported) if type(supported) is int and supported in (0, 1) else None
+
+
+def project_audio_sync(payload):
+    """Project a dedicated AudioSync GET, never retaining missing observations."""
+    supported = _resource_support(payload)
+    values = {}
+    if supported is not None:
+        values["audio_sync_supported"] = supported
+    value = payload.get(PREFIX + "audiosync")
+    if supported is True and type(value) is int and -1000 <= value <= 1000:
+        values["audio_sync"] = value
+    invalidated = tuple(
+        field for field in ("audio_sync", "audio_sync_supported") if field not in values
+    )
+    return OcfProjection(values, supported, invalidated)
+
+
 def project_ocf(href, payload):
     """Only known names, enums and numeric settings enter shared state or dumps."""
-    supported = payload.get(PREFIX + "isSupported", payload.get("isSupported"))
-    supported = (
-        bool(supported) if type(supported) is int and supported in (0, 1) else None
-    )
+    if href == BASE + "audiosync":
+        return project_audio_sync(payload)
+    supported = _resource_support(payload)
     values = {}
     invalidated = []
+    if href == BASE + "channelVolume":
+        channels = parse_channel_volume(payload)
+        return OcfProjection(channels.values, supported, channels.invalidated)
     if supported is False:
         return OcfProjection(values, supported)
     names = {
         "woofer": {"woofer": "woofer_level"},
         "tone": {"bass": "bass_level", "treble": "treble_level"},
-        "audiosync": {"audiosync": "audio_sync"},
     }.get(href.removeprefix(BASE), {})
     for raw, field in names.items():
         value = payload.get(PREFIX + raw)
@@ -113,26 +126,4 @@ def project_ocf(href, payload):
         mode = payload.get(PREFIX + "currentEQMode")
         if mode in ("tone", "usereq"):
             values["current_equalizer_mode"] = mode
-    if href == BASE + "channelVolume":
-        channels = payload.get(PREFIX + "channelVolume")
-        if isinstance(channels, list) and len(channels) <= 32:
-            for item in channels:
-                if not isinstance(item, dict):
-                    continue
-                name, value = item.get("name"), item.get("value")
-                if (
-                    isinstance(name, str)
-                    and name in CHANNEL_NAMES
-                    and item.get("status") in (0, "off")
-                ):
-                    invalidated.append("channel_level_" + name)
-                    continue
-                if (
-                    isinstance(name, str)
-                    and name in CHANNEL_NAMES
-                    and type(value) is int
-                    and -100 <= value <= 100
-                    and item.get("status") in (1, "on")
-                ):
-                    values["channel_level_" + name] = value
     return OcfProjection(values, supported, tuple(invalidated))

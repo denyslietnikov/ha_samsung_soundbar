@@ -22,6 +22,10 @@ FULL_LOCAL_INTERVAL = 60.0
 OCF_INTERVAL = 30.0
 
 
+class _OcfFieldsUnavailable(OcfError):
+    """A successful GET omitted required observations, not the whole resource."""
+
+
 def coordinated_command(expected=None, *, read_fields=()):
     """Route existing device commands through the entry's transaction queue."""
 
@@ -322,12 +326,16 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         error = await self._read_ocf(href)
         if error is not None:
             raise OcfError(error)
-        if any(
-            self.state.records["ocf"].get(key) is None
-            or self.state.records["ocf"].get(key) is before[key]
+        missing = tuple(
+            key
             for key in fields
-        ):
-            raise OcfError("malformed")
+            if self.state.records["ocf"].get(key) is None
+            or self.state.records["ocf"].get(key) is before[key]
+        )
+        if missing:
+            self.state.invalidate("ocf", missing)
+            self.state.ocf_unavailable_fields.update(missing)
+            raise _OcfFieldsUnavailable("malformed")
 
     async def async_write_ocf(
         self,
@@ -338,6 +346,7 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         switch_profile=None,
         tone_profile=None,
         eq_profile=None,
+        setting_profile=None,
         guard=None,
         required_fields=(),
         context_fields=(),
@@ -385,11 +394,33 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
                         ):
                             raise OcfError("malformed")
                     guard()
-                if isinstance(payload, dict):
+                if setting_profile is not None:
+                    from .ocf_level_profiles import valid_level_payload
+
+                    if not valid_level_payload(setting_profile, href, payload) or any(
+                        item is not None
+                        for item in (
+                            woofer_profile,
+                            switch_profile,
+                            tone_profile,
+                            eq_profile,
+                        )
+                    ):
+                        raise OcfError("unverified")
+                    value = payload[setting_profile.property]
+                    if setting_profile.wire_name is not None:
+                        value = value[0]["value"]
+                    # A minimal channel patch has no support/schema observations.
+                    self.state.begin_write({setting_profile.field: value}, source="ocf")
+                elif isinstance(payload, dict):
                     self.state.begin_write(
                         project_ocf(href, payload).values, source="ocf"
                     )
-                if eq_profile is not None:
+                if setting_profile is not None:
+                    result = await self.ocf.async_write(
+                        href, payload, setting_profile=setting_profile
+                    )
+                elif eq_profile is not None:
                     result = await self.ocf.async_write(
                         href, payload, eq_profile=eq_profile
                     )
@@ -415,6 +446,8 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
                 return result
             except asyncio.CancelledError:
                 self._ocf_failed(href, "transport")
+                raise
+            except _OcfFieldsUnavailable:
                 raise
             except OcfError as error:
                 self._ocf_failed(href, error.kind)

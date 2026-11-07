@@ -12,6 +12,7 @@ from .api_extension.SoundbarDevice import SoundbarDevice
 from .device_info import build_device_info
 from .entity_updates import register_device_update_listener
 from .models import SoundbarConfigEntry
+from .ocf_level_profiles import Q800F_LEVELS, LevelProfile
 from .ocf_profiles import Q800F_TONE
 
 _LOGGER = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ async def async_setup_entry(
     device = config_entry.runtime_data.device
     added = False
     tone_added = set()
+    levels_added = set()
 
     def discover():
         nonlocal added
@@ -36,14 +38,50 @@ async def async_setup_entry(
             if field not in tone_added and device.ocf_tone_profile(field) is not None:
                 tone_added.add(field)
                 entities.append(SoundbarToneNumberEntity(device, profile))
+        for field in Q800F_LEVELS:
+            profile = device.ocf_level_profile(field)
+            if field not in levels_added and profile is not None:
+                levels_added.add(field)
+                entities.append(SoundbarLevelNumberEntity(device, profile))
         if entities:
             register_device_update_listener(config_entry, device, entities)
             async_add_entities(entities)
 
     discover()
-    if not added and not tone_added:
+    if not added and not tone_added and not levels_added:
         async_add_entities([])
     config_entry.async_on_unload(device.add_update_listener(discover))
+
+
+class SoundbarLevelNumberEntity(NumberEntity):
+    """An independently discovered, locally verified channel level or delay."""
+
+    _attr_has_entity_name = True
+
+    def __init__(self, device: SoundbarDevice, profile: LevelProfile):
+        self._device = device
+        self._soundbar_level_field = profile.field
+        self.entity_description = NumberEntityDescription(
+            key=profile.field,
+            translation_key=profile.field,
+            native_min_value=profile.minimum,
+            native_max_value=profile.maximum,
+            native_step=profile.step,
+            native_unit_of_measurement=profile.unit,
+            mode=NumberMode.SLIDER,
+            icon="mdi:timer-outline"
+            if profile.field == "audio_sync"
+            else "mdi:tune-vertical",
+        )
+        self._attr_unique_id = f"{device.device_id}_num_{profile.field}"
+        self._attr_device_info = build_device_info(device)
+
+    @property
+    def native_value(self) -> float | None:
+        return self._device.ocf_level_value(self._soundbar_level_field)
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self._device.set_ocf_level(self._soundbar_level_field, value)
 
 
 class SoundbarToneNumberEntity(NumberEntity):

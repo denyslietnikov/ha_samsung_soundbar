@@ -58,6 +58,7 @@ def local_device():
         can_control_woofer_level=True,
         ocf_woofer_profile=None,
         ocf_tone_profile=lambda field: None,
+        ocf_level_profile=lambda field: None,
         ocf_audio_profile=lambda field: None,
         can_control_audio_switch=lambda field: True,
         add_update_listener=subscribe,
