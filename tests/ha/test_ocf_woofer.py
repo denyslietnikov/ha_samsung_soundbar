@@ -1,0 +1,206 @@
+"""Real HA Woofer slider, stable IDs, route availability and service validation."""
+
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+
+from custom_components.samsung_soundbar.const import DOMAIN
+from custom_components.samsung_soundbar.local_ocf import OcfError, OcfWriteResult
+from custom_components.samsung_soundbar.ocf_profiles import Q800F_WOOFER
+
+from . import test_ocf_state as ocf_fixtures
+from .test_lifecycle import registered
+
+ocf = ocf_fixtures.ocf
+
+HREF = "/sec/networkaudio/woofer"
+FIELD = "x.com.samsung.networkaudio.woofer"
+CONNECTION = "x.com.samsung.networkaudio.connection"
+UNIQUE = "existing-cloud-id_sw_woofer_level"
+
+
+@pytest.fixture
+def woofer(ocf):
+    values = {"level": -6, "connection": "on"}
+    ocf.validated = True
+    ocf.async_read = AsyncMock(
+        side_effect=lambda href: (
+            {FIELD: values["level"], CONNECTION: values["connection"]}
+            if href == HREF
+            else {}
+        )
+    )
+
+    async def write(href, payload, *, woofer_profile):
+        assert href == HREF
+        assert woofer_profile is Q800F_WOOFER
+        values["level"] = payload[FIELD]
+        return OcfWriteResult(True, True, False, 68)
+
+    ocf.async_write = AsyncMock(side_effect=write)
+    return SimpleNamespace(client=ocf, values=values)
+
+
+async def test_existing_number_id_becomes_local_slider_with_actual_db_readback(
+    hass, entry, transports, woofer
+):
+    old = er.async_get(hass).async_get_or_create(
+        "number",
+        DOMAIN,
+        UNIQUE,
+        suggested_object_id="my_existing_woofer",
+        config_entry=entry,
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    entity_id = registered(hass, entry)[UNIQUE][0]
+    assert entity_id == old.entity_id
+    state = hass.states.get(entity_id)
+    assert state.state == "-6"
+    assert (
+        state.attributes["min"],
+        state.attributes["max"],
+        state.attributes["step"],
+        state.attributes["mode"],
+    ) == (-12, 6, 1, "slider")
+    await hass.services.async_call(
+        "number", "set_value", {"entity_id": entity_id, "value": -7}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "-7"
+    woofer.client.async_write.assert_awaited_once_with(
+        HREF, {FIELD: -7}, woofer_profile=Q800F_WOOFER
+    )
+    transports.auth.assert_not_awaited()
+    transports.api.execute_device_command.assert_not_called()
+    before = registered(hass, entry)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert registered(hass, entry) == before
+    assert hass.states.get(entity_id).state == "-7"
+
+
+async def test_fractional_level_is_not_truncated_by_number_service(
+    hass, entry, transports, woofer
+):
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    entity_id = registered(hass, entry)[UNIQUE][0]
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": entity_id, "value": -6.5},
+            blocking=True,
+        )
+    woofer.client.async_write.assert_not_awaited()
+
+
+async def test_external_app_change_and_disconnect_reach_same_number(
+    hass, entry, transports, woofer
+):
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    entity_id = registered(hass, entry)[UNIQUE][0]
+    coordinator = entry.runtime_data.coordinator
+    woofer.values["level"] = -8
+    await coordinator.async_refresh_all()
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "-8"
+    woofer.values["connection"] = "off"
+    await coordinator.async_refresh_all()
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "unavailable"
+    assert entry.runtime_data.device.local_available
+    woofer.client.async_write.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", ("off", "ocf"))
+async def test_off_or_ocf_error_does_not_wake_device_or_fallback_to_relative_commands(
+    hass, entry, transports, woofer, failure
+):
+    transports.rpc.remote_key = AsyncMock()
+    transports.rpc.power_on = AsyncMock()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    ids = registered(hass, entry)
+    entity_id = ids[UNIQUE][0]
+    for unique, (button_id, _) in ids.items():
+        if "_btn_woofer_" in unique:
+            assert hass.states.get(button_id).state == "unavailable"
+    if failure == "off":
+        transports.rpc.status.return_value = {
+            **transports.rpc.status.return_value,
+            "power": "powerOff",
+        }
+    else:
+        woofer.client.available = False
+        woofer.client.async_read.side_effect = OcfError("auth")
+    await entry.runtime_data.coordinator.async_refresh_all()
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "unavailable"
+    assert registered(hass, entry) == ids
+    transports.rpc.remote_key.assert_not_awaited()
+    transports.rpc.power_on.assert_not_awaited()
+    transports.auth.assert_not_awaited()
+
+
+async def test_cloud_disabled_execute_does_not_disable_verified_ocf_number(
+    hass, entry, transports, woofer
+):
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    device = entry.runtime_data.device
+    device.cloud_feature_disabled = MagicMock(return_value=True)
+    device.coordinator.state.discard_cloud_fields({"woofer_level"})
+    device.coordinator.publish()
+    await hass.async_block_till_done()
+    assert hass.states.get(registered(hass, entry)[UNIQUE][0]).state == "-6"
+
+
+async def test_queued_legacy_button_service_cannot_outlive_ocf_route_change(
+    hass, entry, transports, ocf
+):
+    ocf.async_read = AsyncMock(return_value={})
+    transports.rpc.remote_key = AsyncMock()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    button_id = registered(hass, entry)["existing-cloud-id_btn_woofer_plus"][0]
+    assert hass.states.get(button_id).state != "unavailable"
+    coordinator = entry.runtime_data.coordinator
+    started, release, queued = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def read(href):
+        started.set()
+        await release.wait()
+        return {FIELD: -6, CONNECTION: "on"}
+
+    ocf.async_read.side_effect = read
+    poll = asyncio.create_task(coordinator.async_ocf_snapshot((HREF,)))
+    await started.wait()
+    original = coordinator.async_write
+
+    async def enqueue(*args, **kwargs):
+        queued.set()
+        return await original(*args, **kwargs)
+
+    with patch.object(coordinator, "async_write", new=enqueue):
+        press = asyncio.create_task(
+            hass.services.async_call(
+                "button", "press", {"entity_id": button_id}, blocking=True
+            )
+        )
+        try:
+            await asyncio.wait_for(queued.wait(), 1)
+            release.set()
+            await poll
+            with pytest.raises(HomeAssistantError):
+                await press
+            transports.rpc.remote_key.assert_not_awaited()
+        finally:
+            release.set()
+            await asyncio.gather(poll, press, return_exceptions=True)

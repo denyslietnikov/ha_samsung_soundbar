@@ -15,6 +15,7 @@ from uuid import UUID
 import cbor2
 
 from .ocf_credentials import OcfCredential, async_complete
+from .ocf_profiles import Q800F_WOOFER, validate_woofer_level
 
 _BASE = "/sec/networkaudio/"
 READ_HREFS = frozenset(
@@ -260,7 +261,9 @@ class LocalSoundbarOcfClient:
             try:
                 readback = self._read(href)
                 match = all(
-                    readback.get(key) == value for key, value in payload.items()
+                    type(readback.get(key)) is type(value)
+                    and readback.get(key) == value
+                    for key, value in payload.items()
                 )
             except Exception:  # noqa: BLE001 - failed readback does not authorize a replay
                 _LOGGER.debug("OCF write readback unavailable")
@@ -342,16 +345,20 @@ class LocalSoundbarOcfClient:
             self._ready()
             return await self._run(partial(self._read, href))
 
-    async def async_write(self, href, payload):
-        # Only values proven by the Q800F field probe. Extend via verified profiles.
+    async def async_write(self, href, payload, *, woofer_profile=None):
+        # Wider writes need the model-scoped profile granted by the verified route.
         if (
             href != _WOOFER
             or not isinstance(payload, dict)
             or set(payload) != {_FIELD}
             or type(payload[_FIELD]) is not int
-            or payload[_FIELD] not in (0, 1)
+            or (woofer_profile is not Q800F_WOOFER and payload[_FIELD] not in (0, 1))
         ):
             raise OcfError("unverified")
+        try:
+            validate_woofer_level(payload[_FIELD])
+        except ValueError:
+            raise OcfError("unverified") from None
         payload = dict(payload)
         async with self._lock:
             self._ready()

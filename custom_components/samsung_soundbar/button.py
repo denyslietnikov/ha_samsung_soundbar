@@ -39,6 +39,7 @@ async def async_setup_entry(
 
 
 class SoundbarWooferButton(ButtonEntity):
+    _soundbar_woofer_relative = True
     _attr_has_entity_name = True
     _soundbar_local_only = True
     _soundbar_requires_on = True

@@ -91,8 +91,8 @@ features, while the following media controls use local JSON-RPC over LAN:
 - sound mode
 - codec and streaming-source readback
 
-Q800F also exposes local **Woofer +** and **Woofer -** buttons in Hybrid and
-Local-only modes. They adjust the subwoofer relatively; no absolute level is
+Without a verified OCF Woofer route, Q800F exposes local **Woofer +** and
+**Woofer -** buttons in Hybrid and Local-only modes. They adjust the subwoofer relatively; no absolute level is
 inferred. The buttons require an available LAN connection and an on-state.
 Volume and mute prefer `volumeControl` / `muteControl`, with legacy fallbacks
 when the device reports that a method is unsupported. Power commands require
@@ -140,8 +140,9 @@ recommended. Actual router/device address changes still need field-testing.
 
 Q800F research has confirmed authenticated local OCF access and Woofer
 read/write/readback. **OCF credential import and storage are available in the
-integration options. OCF audio-setting reads now feed the shared coordinator;
-new OCF-backed controls are a later stage. Existing RPC controls are unchanged.**
+integration options. OCF audio-setting reads feed the shared coordinator, and
+Q800F has a verified local Woofer slider. Other OCF-backed controls are a later
+stage. Existing RPC core controls are unchanged.**
 The offline extractor below only validates or explicitly exports
 an existing credential from a selected local file. It makes no network requests
 and cannot prove that the credential still authenticates. The optional Q800F
@@ -191,9 +192,9 @@ missing/null values do not refresh freshness, and readbacks expire after 120
 seconds. Hybrid may use fresh Cloud fallback for these fields only when the
 existing fallback option is enabled. A transport error is not a confirmed Off.
 
-Existing Cloud-only controls are not made locally writable by this step. The
-Woofer slider and additional local switches still require their verified write
-profiles. Unknown EQ/channel shapes and enums are omitted rather than guessed.
+Only the verified Q800F Woofer profile is currently enabled for local writes.
+Other Cloud-only advanced controls still require their own write probes. Unknown
+EQ/channel shapes and enums are omitted rather than guessed.
 
 Use this read-only action to inspect the saved entry's audio settings:
 
@@ -209,6 +210,36 @@ per-field source/age/TTL, never raw OCF payloads, PSK or client/device OCF UUIDs
 `dump_discovery_snapshot` also includes this safe OCF section. Coordinator source
 names are now `rpc`, `ocf`, `cloud`; the legacy top-level `local` section remains
 RPC diagnostics. No OBSERVE subscription or arbitrary OCF POST service is exposed.
+
+### Local Q800F Woofer Slider
+
+After OCF authentication and valid Woofer readback, **Woofer** appears as a native
+HA number slider: **-12 to +6 dB, step 1**. It retains the existing
+`<device_id>_sw_woofer_level` unique ID, including across reload and mode changes;
+an existing number entity is reused. Discovery is shared, not polled per entity.
+The older Woofer checkbox controls optional Cloud exposure; the verified local
+Woofer control is discovered automatically. HA entity settings can disable it.
+
+The slider needs fresh OCF level/connection fields, a connected subwoofer and
+fresh, available RPC confirmation that the soundbar is on. Neither creating nor
+using it powers on the soundbar. Each command reads the target resource first,
+checks availability inside the shared command queue, writes once, then requires
+fresh typed readback. Fractions, booleans and out-of-range levels are rejected.
+Ambiguous or rejected commands are never repeated through Cloud or relative keys.
+External app/remote changes arrive through the existing OCF polling tier.
+
+Local relative-button IDs are retained; they remain available without the verified
+OCF route. Once the absolute route is established they are unavailable, avoiding
+two active control schemes. An OCF outage does not silently reactivate relative
+writes. Existing dashboards/automations using those buttons should be moved to
+the Woofer number when adopting the absolute route; registry entries are not
+deleted or automatically rewritten.
+
+Owner-approved Q800F/1103.1 probes verified -12, -7, -6 and +6 with exact OCF
+readback, in addition to earlier 0/+1 evidence. In particular, -7 is valid over
+OCF, so this path is not restricted to -12 plus the -6..+6 levels. This was a
+bounded sample, not an exhaustive step scan. The original level and power were
+restored. Installation and UI operation in the user's HA still need a field test.
 
 ### Already Copied the Hashed Q800F Store?
 

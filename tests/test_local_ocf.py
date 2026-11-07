@@ -211,6 +211,21 @@ class TestLocalOcf(IsolatedAsyncioTestCase):
         with self.assertRaises(self.module.OcfError):
             await self.client.async_read(WOOFER)
 
+    async def test_verified_q800f_profile_allows_actual_negative_db_values(self):
+        from custom_components.samsung_soundbar.ocf_profiles import Q800F_WOOFER
+
+        self.level = -7
+        result = await self.client.async_write(
+            WOOFER, {FIELD: -7}, woofer_profile=Q800F_WOOFER
+        )
+        self.assertTrue(result.readback_matches)
+        self.assertEqual(cbor2.loads(self.session.post.call_args.args[1]), {FIELD: -7})
+
+    async def test_readback_boolean_is_not_integer_zero_confirmation(self):
+        self.level = False
+        result = await self.client.async_write(WOOFER, {FIELD: 0})
+        self.assertFalse(result.readback_matches)
+
     async def test_cancelled_error_cleanup_keeps_peer_serialized(self):
         started, release = threading.Event(), threading.Event()
 

@@ -22,14 +22,25 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     device = config_entry.runtime_data.device
-    entities = []
-    if device.can_control_woofer_level:
-        entities.append(SoundbarWooferNumberEntity(device, "woofer_level"))
+    added = False
+
+    def discover():
+        nonlocal added
+        if added or not device.can_control_woofer_level:
+            return
+        added = True
+        entities = [SoundbarWooferNumberEntity(device, "woofer_level")]
         register_device_update_listener(config_entry, device, entities)
-    async_add_entities(entities)
+        async_add_entities(entities)
+
+    discover()
+    if not added:
+        async_add_entities([])
+        config_entry.async_on_unload(device.add_update_listener(discover))
 
 
 class SoundbarWooferNumberEntity(NumberEntity):
+    _soundbar_woofer_absolute = True
     _soundbar_cloud_only = True
     _soundbar_cloud_capabilities = ("execute",)
 
@@ -41,7 +52,7 @@ class SoundbarWooferNumberEntity(NumberEntity):
         self.entity_description = NumberEntityDescription(
             native_max_value=6,
             native_min_value=-12,
-            mode=NumberMode.BOX,
+            mode=NumberMode.SLIDER,
             native_step=1,
             native_unit_of_measurement="dB",
             key=append_unique_id,
@@ -55,7 +66,7 @@ class SoundbarWooferNumberEntity(NumberEntity):
 
     @property
     def name(self):
-        return self.__append_unique_id
+        return "Woofer"
 
     # ------ STATE FUNCTIONS --------
 
@@ -64,4 +75,4 @@ class SoundbarWooferNumberEntity(NumberEntity):
         return self.__device.woofer_level
 
     async def async_set_native_value(self, value: float):
-        await self.__device.set_woofer(int(value))
+        await self.__device.set_woofer(value)

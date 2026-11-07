@@ -1,4 +1,4 @@
-"""OCF joins the real HA lifecycle without adding entities or cloud traffic."""
+"""OCF joins the real HA lifecycle without duplicate entities or cloud traffic."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,6 +20,7 @@ WOOFER = "/sec/networkaudio/woofer"
 def ocf(hass, entry):
     client = MagicMock()
     client.available = True
+    client.validated = True
     client.async_close = AsyncMock()
     client.async_write = AsyncMock()
     client.diagnostics.return_value = {"configured": True, "available": True}
@@ -52,7 +53,7 @@ async def test_polling_and_read_only_diagnostics_share_entry_transport(
     assert coordinator.state.value("woofer_level") == 1
     assert coordinator.state.resolve("volume_level").source == "rpc"
     registry = registered(hass, entry)
-    assert not any(key.endswith("_sw_woofer_level") for key in registry)
+    assert len([key for key in registry if key.endswith("_sw_woofer_level")]) == 1
     initial_calls = ocf.async_read.await_count
     await coordinator.async_refresh()
     await hass.async_block_till_done()

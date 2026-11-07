@@ -30,6 +30,7 @@ from ..const import (
     DOMAIN,
 )
 from ..coordinator import coordinated_command
+from ..local_ocf import OcfError
 from ..local_rpc import (
     LOCAL_SOUND_MODE_VALUES,
     LocalRpcAuthError,
@@ -39,6 +40,12 @@ from ..local_rpc import (
     LocalRpcTransportError,
     LocalSoundbarRpcClient,
     split_local_readback,
+)
+from ..ocf_profiles import (
+    Q800F_WOOFER,
+    WOOFER_FIELD,
+    WOOFER_HREF,
+    validate_woofer_level,
 )
 from ..ocf_state import OCF_FIELDS
 from .const import RearSpeakerMode, SpeakerIdentifier
@@ -199,6 +206,7 @@ class SoundbarDevice:
     ):
         self.device = device
         self.coordinator = None
+        self.__ocf_woofer_profile = None
         self.cloud_setup_pending = False
         self._device_id = self.device.device_id
         self.__auth_provider = auth_provider
@@ -1486,10 +1494,16 @@ class SoundbarDevice:
         )
 
     async def adjust_local_woofer(self, increase: bool) -> None:
+        if self.ocf_woofer_profile is not None:
+            raise HomeAssistantError("Use the verified absolute Woofer control")
         if not self.can_control_local_woofer or not self.local_available:
             raise HomeAssistantError("Local Woofer controls are unavailable")
 
         async def action():
+            if self.ocf_woofer_profile is not None:
+                raise HomeAssistantError(
+                    "Woofer route changed while queued; use the absolute control"
+                )
             await self.__local_rpc.remote_key(
                 "WOOFER_PLUS" if increase else "WOOFER_MINUS"
             )
@@ -1539,11 +1553,70 @@ class SoundbarDevice:
         )
 
     @property
+    def ocf_woofer_profile(self):
+        coordinator = self.coordinator
+        if (
+            coordinator is None
+            or not coordinator.state.use_ocf
+            or coordinator.ocf is None
+        ):
+            return None
+        if self.__ocf_woofer_profile is not None:
+            return self.__ocf_woofer_profile
+        if coordinator.ocf.validated is not True or not (
+            self.model == Q800F_WOOFER.model
+            or self.local_identifier == Q800F_WOOFER.rpc_identifier
+        ):
+            return None
+        records = coordinator.state.records["ocf"]
+        level = records.get("woofer_level")
+        connection = records.get("woofer_connection")
+        if level is None or connection is None or connection.value not in ("on", "off"):
+            return None
+        try:
+            validate_woofer_level(level.value)
+        except ValueError:
+            return None
+        # Retain the proven route across outages; never silently switch writes to Cloud.
+        self.__ocf_woofer_profile = Q800F_WOOFER
+        return self.__ocf_woofer_profile
+
+    @property
+    def woofer_control_available(self) -> bool:
+        if self.ocf_woofer_profile is not None:
+            coordinator = self.coordinator
+            power = coordinator.state.resolve("power")
+            level = coordinator.state.records["ocf"].get("woofer_level")
+            connection = coordinator.state.records["ocf"].get("woofer_connection")
+            return bool(
+                coordinator.ocf_field_available("woofer_level")
+                and coordinator.ocf_field_available("woofer_connection")
+                and type(level.value) is int
+                and Q800F_WOOFER.minimum <= level.value <= Q800F_WOOFER.maximum
+                and connection.value == "on"
+                and coordinator.state.snapshot().local_available
+                and power is not None
+                and power.source == "rpc"
+                and power.value == "on"
+            )
+        return self.can_control_woofer_level and self.cloud_available
+
+    def require_ocf_woofer_available(self):
+        if self.ocf_woofer_profile is None or not self.woofer_control_available:
+            raise HomeAssistantError(
+                "Local Woofer control is unavailable; check power, OCF access "
+                "and subwoofer connection"
+            )
+
+    @property
     def can_control_woofer_level(self) -> bool:
         return bool(
-            self.__enable_woofer
-            and self.__woofer_supported
-            and not self.cloud_feature_disabled("execute")
+            self.ocf_woofer_profile is not None
+            or (
+                self.__enable_woofer
+                and self.__woofer_supported
+                and not self.cloud_feature_disabled("execute")
+            )
         )
 
     @property
@@ -1773,8 +1846,52 @@ class SoundbarDevice:
             )
         return self.__woofer_connection
 
+    async def set_woofer(self, level: int | float):
+        try:
+            level = validate_woofer_level(level)
+        except ValueError:
+            raise HomeAssistantError(
+                "Woofer level must be an integer between -12 and 6"
+            ) from None
+        profile = self.ocf_woofer_profile
+        if profile is not None:
+            self.require_ocf_woofer_available()
+            try:
+                result = await self.coordinator.async_write_ocf(
+                    WOOFER_HREF,
+                    {WOOFER_FIELD: level},
+                    woofer_profile=profile,
+                    guard=self.require_ocf_woofer_available,
+                    required_fields=("woofer_level", "woofer_connection"),
+                )
+            except OcfError as error:
+                raise HomeAssistantError(
+                    f"Local Woofer operation failed ({error.kind}); "
+                    "no fallback was attempted"
+                ) from None
+            if (
+                result.readback_matches is not True
+                or not self.woofer_control_available
+                or self.woofer_level != level
+            ):
+                outcome = "ambiguous" if result.ambiguous else "readback mismatch"
+                raise HomeAssistantError(
+                    f"Local Woofer write was not confirmed ({outcome}); "
+                    "no retry was attempted"
+                )
+            return
+        if self.local_only:
+            raise HomeAssistantError(
+                "A verified OCF credential and Woofer profile are required"
+            )
+        await self.__set_cloud_woofer(level)
+
     @coordinated_command(lambda self, level: {"woofer_level": level}, cloud_only=True)
-    async def set_woofer(self, level: int):
+    async def __set_cloud_woofer(self, level: int):
+        if self.ocf_woofer_profile is not None:
+            raise HomeAssistantError(
+                "Woofer route changed while queued; retry with the absolute control"
+            )
         await self.set_custom_execution_data(
             href="/sec/networkaudio/woofer",
             property="x.com.samsung.networkaudio.woofer",

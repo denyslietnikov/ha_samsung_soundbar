@@ -225,9 +225,7 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
                 raise OcfError("malformed")
             projection = project_ocf(href, payload)
         except OcfError as error:
-            self._ocf_resources[href] = {"last_error": error.kind, "supported": None}
-            self.state.ocf_unavailable_fields.update(RESOURCE_FIELDS[href])
-            self.transport_changed("ocf", bool(self.ocf.available))
+            self._ocf_failed(href, error.kind)
             return error.kind
         if projection.supported is False:
             self.state.invalidate("ocf", RESOURCE_FIELDS[href])
@@ -243,6 +241,11 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         self.state.transport_available["ocf"] = bool(self.ocf.available)
         self.receive("ocf", projection.values, observed_at=observed_at)
         return None
+
+    def _ocf_failed(self, href, kind):
+        self._ocf_resources[href] = {"last_error": kind, "supported": None}
+        self.state.ocf_unavailable_fields.update(RESOURCE_FIELDS[href])
+        self.transport_changed("ocf", bool(self.ocf.available))
 
     async def async_ocf_snapshot(self, hrefs=POLL_HREFS):
         """Read only the fixed audio projection, never return raw OCF responses."""
@@ -306,7 +309,21 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             and record.fresh(self._clock())
         )
 
-    async def async_write_ocf(self, href, payload):
+    async def _read_required_ocf_fields(self, href, fields):
+        before = {key: self.state.records["ocf"].get(key) for key in fields}
+        error = await self._read_ocf(href)
+        if error is not None:
+            raise OcfError(error)
+        if any(
+            self.state.records["ocf"].get(key) is None
+            or self.state.records["ocf"].get(key) is before[key]
+            for key in fields
+        ):
+            raise OcfError("malformed")
+
+    async def async_write_ocf(
+        self, href, payload, *, woofer_profile=None, guard=None, required_fields=()
+    ):
         """Internal verified-route command; never an arbitrary public POST action."""
         if self.ocf is None or not self.state.use_ocf or href not in RESOURCE_FIELDS:
             raise OcfError("unverified")
@@ -314,17 +331,26 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
             if self._shutdown_requested:
                 raise OcfError("closed")
             try:
-                result = await self.ocf.async_write(href, payload)
+                if guard is not None:
+                    await self._read_required_ocf_fields(href, required_fields)
+                    guard()
+                if woofer_profile is None:
+                    result = await self.ocf.async_write(href, payload)
+                else:
+                    result = await self.ocf.async_write(
+                        href, payload, woofer_profile=woofer_profile
+                    )
                 # No optimistic success and no other-transport replay, even on timeout.
-                await self._read_ocf(href)
+                if required_fields:
+                    await self._read_required_ocf_fields(href, required_fields)
+                else:
+                    await self._read_ocf(href)
                 return result
+            except asyncio.CancelledError:
+                self._ocf_failed(href, "transport")
+                raise
             except OcfError as error:
-                self._ocf_resources[href] = {
-                    "last_error": error.kind,
-                    "supported": None,
-                }
-                self.state.ocf_unavailable_fields.update(RESOURCE_FIELDS[href])
-                self.transport_changed("ocf", bool(self.ocf.available))
+                self._ocf_failed(href, error.kind)
                 raise
             finally:
                 self.publish()

@@ -145,7 +145,7 @@
                     "settings_advanced_audio": "Enable 'Advanced Audio switches' capabilities (NightMode, BassMode, VoiceEnhancer, Virtual)",
                     "settings_eq": "Enable 'EQ selector' capabilities",
                     "settings_soundmode": "Enable 'Soundmode selector' capabilities",
-                    "settings_woofer": "Enable 'Woofer number' capability",
+                    "settings_woofer": "Enable optional Cloud Woofer number entity",
                     "device_volume": "Max Volume (int)"
                 },
                 "description": "Some soundbars have a different featureset than others. Please the features supported by your soundbar (visible in the SmartThings App).",
@@ -217,7 +217,7 @@
                     "settings_advanced_audio": "Enable Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier, Virtual)",
                     "settings_eq": "Enable EQ selector",
                     "settings_soundmode": "Enable Sound Mode selector",
-                    "settings_woofer": "Enable Woofer number entity",
+                    "settings_woofer": "Enable optional Cloud Woofer number entity",
                     "device_volume": "Maximum volume",
                     "ocf_action": "Local OCF credential (other changes are not saved for import/forget)"
                 },
