@@ -109,6 +109,41 @@ class TestLocalOcf(IsolatedAsyncioTestCase):
             )
         self.session.post.assert_called_once()
 
+    async def test_eq_grant_accepts_only_verified_preset_command(self):
+        from custom_components.samsung_soundbar.ocf_profiles import (
+            Q800F_EQ,
+            EqualizerProfile,
+        )
+
+        prefix = "x.com.samsung.networkaudio."
+        payload = {prefix + "EQname": "POP", prefix + "action": "setEQmode"}
+        self.session.get.side_effect = lambda path, **kwargs: (
+            69,
+            cbor2.dumps({"di": str(TARGET)} if path == ["oic", "d"] else payload),
+        )
+        result = await self.client.async_write(
+            Q800F_EQ.href, payload, eq_profile=Q800F_EQ
+        )
+        self.assertTrue(result.readback_matches)
+        for invalid in (
+            {prefix + "EQname": "ROCK", prefix + "action": "setEQmode"},
+            {prefix + "EQname": "pop", prefix + "action": "setEQmode"},
+            {prefix + "EQname": "POP"},
+            {prefix + "EQband": ["0"] * 7},
+            {**payload, prefix + "EQband": ["0"] * 7},
+            {prefix + "EQname": "POP", prefix + "action": "other"},
+        ):
+            with self.subTest(payload=invalid), self.assertRaises(self.module.OcfError):
+                await self.client.async_write(
+                    Q800F_EQ.href, invalid, eq_profile=Q800F_EQ
+                )
+        for profile in (None, EqualizerProfile()):
+            with self.assertRaises(self.module.OcfError):
+                await self.client.async_write(
+                    Q800F_EQ.href, payload, eq_profile=profile
+                )
+        self.session.post.assert_called_once()
+
     async def test_mismatched_authenticated_identity_is_not_accepted(self):
         self.session.get.return_value = (69, cbor2.dumps({"di": str(CLIENT)}))
         self.session.get.side_effect = None

@@ -17,8 +17,10 @@ import cbor2
 from .ocf_credentials import OcfCredential, async_complete
 from .ocf_profiles import (
     Q800F_AUDIO_SWITCHES,
+    Q800F_EQ,
     Q800F_TONE,
     Q800F_WOOFER,
+    valid_eq_payload,
     validate_woofer_level,
 )
 
@@ -373,13 +375,26 @@ class LocalSoundbarOcfClient:
         woofer_profile=None,
         switch_profile=None,
         tone_profile=None,
+        eq_profile=None,
     ):
         # Wider writes need the model-scoped profile granted by the verified route.
         switch_write = any(
             switch_profile is item for item in Q800F_AUDIO_SWITCHES.values()
         )
         tone_write = tone_profile is not None
-        if tone_write:
+        eq_write = eq_profile is not None
+        if eq_write:
+            if (
+                eq_profile is not Q800F_EQ
+                or href != Q800F_EQ.href
+                or any(
+                    item is not None
+                    for item in (tone_profile, switch_profile, woofer_profile)
+                )
+                or not valid_eq_payload(payload)
+            ):
+                raise OcfError("unverified")
+        elif tone_write:
             valid = (
                 any(tone_profile is item for item in Q800F_TONE.values())
                 and switch_profile is None
@@ -412,7 +427,7 @@ class LocalSoundbarOcfClient:
             or (woofer_profile is not Q800F_WOOFER and payload[_FIELD] not in (0, 1))
         ):
             raise OcfError("unverified")
-        if not switch_write and not tone_write:
+        if not switch_write and not tone_write and not eq_write:
             try:
                 validate_woofer_level(payload[_FIELD])
             except ValueError:

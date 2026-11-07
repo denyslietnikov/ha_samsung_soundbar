@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from .ocf_profiles import parse_eq_metadata
+
 BASE = "/sec/networkaudio/"
 PREFIX = "x.com.samsung.networkaudio."
 CHANNEL_NAMES = frozenset(
@@ -28,7 +30,14 @@ RESOURCE_FIELDS = {
     },
     BASE + "spacefitSound": {"spacefit_sound"},
     BASE + "tone": {"bass_level", "treble_level"},
-    BASE + "eq": {"active_equalizer_preset", "equalizer_band_levels"},
+    BASE + "eq": {
+        "active_equalizer_preset",
+        "equalizer_band_levels",
+        "supported_equalizer_presets",
+        "equalizer_action",
+        "equalizer_schema_valid",
+    },
+    BASE + "currentEQMode": {"current_equalizer_mode"},
     BASE + "channelVolume": {"channel_level_" + name for name in CHANNEL_NAMES},
     BASE + "audiosync": {"audio_sync"},
 }
@@ -81,6 +90,7 @@ def project_ocf(href, payload):
         if connection in ("on", "off"):
             values["woofer_connection"] = connection
     if href == BASE + "eq":
+        values.update(parse_eq_metadata(payload))
         preset = payload.get(PREFIX + "EQname")
         # Do not export arbitrary strings from a device as diagnostic metadata.
         if isinstance(preset, str) and preset.lower() in {
@@ -99,6 +109,10 @@ def project_ocf(href, payload):
             and all(type(value) is int and -100 <= value <= 100 for value in bands)
         ):
             values["equalizer_band_levels"] = list(bands)
+    if href == BASE + "currentEQMode":
+        mode = payload.get(PREFIX + "currentEQMode")
+        if mode in ("tone", "usereq"):
+            values["current_equalizer_mode"] = mode
     if href == BASE + "channelVolume":
         channels = payload.get(PREFIX + "channelVolume")
         if isinstance(channels, list) and len(channels) <= 32:

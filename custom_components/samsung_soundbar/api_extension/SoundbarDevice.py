@@ -42,6 +42,7 @@ from ..local_rpc import (
     LocalSoundbarRpcClient,
     split_local_readback,
 )
+from ..ocf_equalizer import OcfEqualizer
 from ..ocf_profiles import (
     LEGACY_AUDIO_SWITCH_FIELDS,
     Q800F_AUDIO_SWITCHES,
@@ -214,6 +215,7 @@ class SoundbarDevice:
         self.__ocf_woofer_profile = None
         self.__ocf_audio_profiles = {}
         self.__ocf_tone_profiles = {}
+        self.ocf_equalizer = OcfEqualizer(self)
         self.cloud_setup_pending = False
         self._device_id = self.device.device_id
         self.__auth_provider = auth_provider
@@ -1553,10 +1555,13 @@ class SoundbarDevice:
     @property
     def can_select_equalizer_preset(self) -> bool:
         return bool(
-            self.__enable_eq
-            and not self.cloud_feature_disabled("execute")
-            and self.__equalizer_supported
-            and self.supported_equalizer_presets
+            self.ocf_equalizer.profile is not None
+            or (
+                self.__enable_eq
+                and not self.cloud_feature_disabled("execute")
+                and self.__equalizer_supported
+                and self.supported_equalizer_presets
+            )
         )
 
     @property
@@ -2362,26 +2367,48 @@ class SoundbarDevice:
 
     @property
     def active_equalizer_preset(self):
+        if self.ocf_equalizer.profile is not None:
+            return self.ocf_equalizer.value("active_equalizer_preset")
         if self.coordinator is not None:
             return self.__coordinated_value("active_equalizer_preset")
         return self.__active_eq_preset
 
     @property
     def supported_equalizer_presets(self):
+        if self.ocf_equalizer.profile is not None:
+            return self.ocf_equalizer.options
         return self.__supported_eq_presets
 
     @property
     def equalizer_action(self):
+        if self.ocf_equalizer.profile is not None:
+            return self.ocf_equalizer.value("equalizer_action")
         return self.__eq_action
 
     @property
     def equalizer_bands(self):
+        if self.ocf_equalizer.profile is not None:
+            return self.ocf_equalizer.value("equalizer_band_levels")
         return self.__eq_bands
+
+    async def set_equalizer_preset(self, preset: str):
+        if self.ocf_equalizer.profile is not None:
+            await self.ocf_equalizer.async_select(preset)
+            return
+        if self.local_only:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="ocf_eq_unavailable"
+            )
+        await self.__set_cloud_equalizer_preset(preset)
 
     @coordinated_command(
         lambda self, preset: {"active_equalizer_preset": preset}, cloud_only=True
     )
-    async def set_equalizer_preset(self, preset: str):
+    async def __set_cloud_equalizer_preset(self, preset: str):
+        if self.ocf_equalizer.profile is not None:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="ocf_eq_route_changed"
+            )
         await self.set_custom_execution_data(
             href="/sec/networkaudio/eq",
             property="x.com.samsung.networkaudio.EQname",

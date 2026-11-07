@@ -54,6 +54,65 @@ Q800F_TONE = {
 
 
 @dataclass(frozen=True)
+class EqualizerProfile:
+    href: str = "/sec/networkaudio/eq"
+    presets: tuple[str, ...] = ("NONE", "POP", "JAZZ", "CLASSIC", "CUSTOM")
+    band_count: int = 7
+    minimum: int = -6
+    maximum: int = 6
+
+
+Q800F_EQ = EqualizerProfile()
+EQ_PREFIX = "x.com.samsung.networkaudio."
+
+
+def parse_eq_metadata(payload):
+    """Project only the observed Q800F schema; do not publish arbitrary enums."""
+    preset = payload.get(EQ_PREFIX + "EQname")
+    options = payload.get(EQ_PREFIX + "supportedList")
+    action = payload.get(EQ_PREFIX + "action")
+    bands = payload.get(EQ_PREFIX + "EQband")
+    options_valid = (
+        isinstance(options, list)
+        and 0 < len(options) <= 32
+        and all(isinstance(item, str) for item in options)
+        and len(set(options)) == len(options)
+    )
+    known = (
+        [item for item in options if item in Q800F_EQ.presets] if options_valid else []
+    )
+    bands_valid = (
+        isinstance(bands, list)
+        and len(bands) == Q800F_EQ.band_count
+        and all(
+            type(item) is str and item in {str(value) for value in range(-6, 7)}
+            for item in bands
+        )
+    )
+    valid = preset in known and action == "setEQmode" and bands_valid
+    values = {"equalizer_schema_valid": valid}
+    if isinstance(preset, str) and preset in Q800F_EQ.presets:
+        values["active_equalizer_preset"] = preset
+    if known:
+        values["supported_equalizer_presets"] = known
+    if action == "setEQmode":
+        values["equalizer_action"] = action
+    if bands_valid:
+        values["equalizer_band_levels"] = [int(item) for item in bands]
+    return values
+
+
+def valid_eq_payload(payload):
+    return (
+        isinstance(payload, dict)
+        and set(payload) == {EQ_PREFIX + "EQname", EQ_PREFIX + "action"}
+        and type(payload[EQ_PREFIX + "EQname"]) is str
+        and payload[EQ_PREFIX + "EQname"] in Q800F_EQ.presets
+        and payload[EQ_PREFIX + "action"] == "setEQmode"
+    )
+
+
+@dataclass(frozen=True)
 class AudioSwitchProfile:
     field: str
     href: str

@@ -338,24 +338,56 @@ class SoundbarCoordinator(DataUpdateCoordinator[StateSnapshot]):
         woofer_profile=None,
         switch_profile=None,
         tone_profile=None,
+        eq_profile=None,
         guard=None,
         required_fields=(),
+        context_fields=(),
+        rpc_fields=(),
     ):
         """Internal verified-route command; never an arbitrary public POST action."""
         if self.ocf is None or not self.state.use_ocf or href not in RESOURCE_FIELDS:
+            raise OcfError("unverified")
+        if not set(rpc_fields) <= {"power", "sound_mode"}:
+            raise OcfError("unverified")
+        if len(context_fields) > len(RESOURCE_FIELDS) or any(
+            resource not in RESOURCE_FIELDS
+            or not set(fields) <= RESOURCE_FIELDS[resource]
+            for resource, fields in context_fields
+        ):
             raise OcfError("unverified")
         async with self._write_lock, self._poll_lock:
             if self._shutdown_requested:
                 raise OcfError("closed")
             try:
                 if guard is not None:
+                    for resource, fields in context_fields:
+                        await self._read_required_ocf_fields(resource, fields)
                     await self._read_required_ocf_fields(href, required_fields)
+                    if rpc_fields:
+                        before = {
+                            key: self.state.records["rpc"].get(key)
+                            for key in rpc_fields
+                        }
+                        try:
+                            await self.device.read_local_fields(set(rpc_fields))
+                        except LocalRpcError:
+                            raise OcfError("transport") from None
+                        if any(
+                            self.state.records["rpc"].get(key) is None
+                            or self.state.records["rpc"].get(key) is before[key]
+                            for key in rpc_fields
+                        ):
+                            raise OcfError("malformed")
                     guard()
                 if isinstance(payload, dict):
                     self.state.begin_write(
                         project_ocf(href, payload).values, source="ocf"
                     )
-                if tone_profile is not None:
+                if eq_profile is not None:
+                    result = await self.ocf.async_write(
+                        href, payload, eq_profile=eq_profile
+                    )
+                elif tone_profile is not None:
                     result = await self.ocf.async_write(
                         href, payload, tone_profile=tone_profile
                     )

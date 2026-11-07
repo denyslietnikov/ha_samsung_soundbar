@@ -22,6 +22,11 @@ def register_device_update_listener(
     coordinator = device.coordinator
 
     def available_for(entity):
+        if (
+            getattr(entity, "_soundbar_eq_preset", False) is True
+            and device.ocf_equalizer.profile is not None
+        ):
+            return device.ocf_equalizer.available
         tone_field = getattr(entity, "_soundbar_tone_field", None)
         if isinstance(tone_field, str):
             return device.tone_control_available(tone_field)

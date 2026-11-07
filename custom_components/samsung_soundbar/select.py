@@ -38,8 +38,19 @@ async def async_setup_entry(
 ) -> None:
     device = config_entry.runtime_data.device
     entities = []
-    if device.can_select_equalizer_preset:
-        entities.append(EqPresetSelectEntity(device, "eq_preset", "mdi:tune-vertical"))
+    eq_added = False
+
+    def discover_eq():
+        nonlocal eq_added
+        if eq_added or not device.can_select_equalizer_preset:
+            return
+        eq_added = True
+        eq_entities = [EqPresetSelectEntity(device, "eq_preset", "mdi:tune-vertical")]
+        register_device_update_listener(config_entry, device, eq_entities)
+        async_add_entities(eq_entities)
+
+    discover_eq()
+    config_entry.async_on_unload(device.add_update_listener(discover_eq))
     if device.can_select_sound_mode:
         entities.append(
             SoundModeSelectEntity(device, "sound_mode_preset", "mdi:surround-sound")
@@ -54,6 +65,7 @@ async def async_setup_entry(
 
 
 class EqPresetSelectEntity(SelectEntity):
+    _soundbar_eq_preset = True
     _soundbar_cloud_only = True
     _soundbar_cloud_capabilities = ("execute",)
 
@@ -65,7 +77,12 @@ class EqPresetSelectEntity(SelectEntity):
     ):
         self.entity_description = SelectEntityDescription(
             key=append_unique_id,
+            translation_key="eq_preset",
         )
+        if device.ocf_equalizer.profile is not None:
+            self._attr_has_entity_name = True
+        else:
+            self._attr_name = SELECT_ENTITY_NAMES["eq_preset"]
         self.__base_icon = icon_string
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
@@ -73,10 +90,6 @@ class EqPresetSelectEntity(SelectEntity):
         self.__append_unique_id = append_unique_id
 
     # ---------- GENERAL ---------------
-
-    @property
-    def name(self):
-        return SELECT_ENTITY_NAMES.get(self.__append_unique_id, self.__append_unique_id)
 
     @property
     def options(self) -> list[str]:

@@ -141,7 +141,8 @@ recommended. Actual router/device address changes still need field-testing.
 Q800F research has confirmed authenticated local OCF access and Woofer
 read/write/readback. **OCF credential import and storage are available in the
 integration options. OCF audio-setting reads feed the shared coordinator, and
-Q800F has verified local Woofer, Bass and Treble sliders and six local audio switches. Other
+Q800F has verified local Woofer, Bass and Treble sliders, an EQ preset select and
+six local audio switches. Other
 OCF-backed controls are a later stage. Existing RPC core controls are unchanged.**
 The offline extractor below only validates or explicitly exports
 an existing credential from a selected local file. It makes no network requests
@@ -192,7 +193,7 @@ missing/null values do not refresh freshness, and readbacks expire after 120
 seconds. Hybrid may use fresh Cloud fallback for these fields only when the
 existing fallback option is enabled. A transport error is not a confirmed Off.
 
-Verified Q800F Woofer, Bass/Treble, Advanced Audio and SpaceFit profiles are enabled for local
+Verified Q800F Woofer, Bass/Treble, EQ presets, Advanced Audio and SpaceFit profiles are enabled for local
 writes. Other controls still require their own write probes. Unknown EQ/channel
 shapes and enums are omitted rather than guessed.
 
@@ -288,9 +289,37 @@ External changes use the existing shared OCF polling tier.
 Owner-approved Q800F/1103.1 probes confirmed -6, -1, +1 and +6 for each property in
 Surround mode. Every probe restored the original level, kept the other tone field,
 EQ and Advanced Audio unchanged, and restored original power. This is a bounded
-sample, not proof of every integer or every sound-mode combination. EQ presets,
+sample, not proof of every integer or every sound-mode combination.
 EQ bands, channel levels and Audio Sync writes remain separate future work.
 Installed-HA and visual SmartThings app checks remain pending.
+
+### Local EQ Presets
+
+Authenticated Q800F EQ metadata enables the existing **EQ Preset** select locally,
+with its existing `_sw_eq_preset` unique ID. Available choices come from the device
+and are limited to the verified `NONE`, `POP`, `JAZZ`, `CLASSIC`, `CUSTOM` names.
+`NONE` is the neutral EQ preset, not the soundbar's power state or Sound Mode.
+The select can appear later when valid metadata first arrives; outages and
+credential replacement do not delete its registry entry.
+
+The verified context is Standard sound mode, Bass Boost off, power on and local
+`currentEQMode: usereq`. Outside that context the local select is unavailable.
+A command rereads RPC power/sound mode, OCF context and current options under the
+shared queue; missing/error RPC fields cannot reuse old cached prerequisites. It sends
+`EQname` with `action: setEQmode`, and requires exact readback. It never changes
+Sound Mode/Bass Boost or power implicitly, and never retries through Cloud.
+Without a verified local EQ profile the legacy Cloud route is unchanged.
+
+Owner-approved preset probes confirmed all five choices and restored initial
+EQ, neighboring settings and each probe's original power/mode. The seven raw
+string-valued `EQband` entries are normalized for read-only diagnostics, without
+inventing frequency labels. Tested band payloads returned ACK without changing
+the curve, so **band writes and band sliders are not enabled**. Further work
+needs an observed working band command; an ACK alone does not authorize it.
+The owner's current SmartThings UI exposes the two Bass/Treble controls, not a
+seven-band equalizer. The dormant API data is not evidence of seven-band UI/DSP
+support on Q800F; band control remains research, not an advertised feature.
+Installed-HA/app field tests and wider sound-mode compatibility remain pending.
 
 ### Already Copied the Hashed Q800F Store?
 

@@ -1,5 +1,9 @@
 {
     "exceptions": {
+        "ocf_eq_invalid": {"message": "Wählen Sie einen unterstützten EQ-Preset mit seinem genauen Namen."},
+        "ocf_eq_unavailable": {"message": "Der lokale EQ ist nicht verfügbar. Verwenden Sie Standard ohne Bass Boost und prüfen Sie den Betriebszustand und die OCF-Rückmeldung."},
+        "ocf_eq_unconfirmed": {"message": "Die lokale EQ-Änderung wurde nicht bestätigt. Kein erneuter Versuch oder Cloud-Fallback wurde ausgeführt."},
+        "ocf_eq_route_changed": {"message": "Die EQ-Verbindung hat sich während des Wartens geändert. Versuchen Sie es mit der lokalen EQ-Steuerung erneut."},
         "ocf_tone_invalid": {
             "message": "Bass und Höhen müssen ganzzahlige Werte zwischen -6 und 6 sein."
         },
@@ -11,6 +15,7 @@
         }
     },
     "entity": {
+        "select": {"eq_preset": {"name": "EQ-Preset"}},
         "number": {
             "bass_level": {"name": "Bass"},
             "treble_level": {"name": "Höhen"}

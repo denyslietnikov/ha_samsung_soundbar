@@ -1,5 +1,9 @@
 {
     "exceptions": {
+        "ocf_eq_invalid": {"message": "Choose a supported EQ preset using its exact name."},
+        "ocf_eq_unavailable": {"message": "Local EQ is unavailable. Use Standard sound mode with Bass Boost off, and check power and OCF readback."},
+        "ocf_eq_unconfirmed": {"message": "The local EQ change was not confirmed. No retry or Cloud fallback was attempted."},
+        "ocf_eq_route_changed": {"message": "The EQ route changed while queued. Retry using the local EQ control."},
         "ocf_tone_invalid": {
             "message": "Bass and Treble levels must be integers between -6 and 6."
         },
@@ -11,6 +15,7 @@
         }
     },
     "entity": {
+        "select": {"eq_preset": {"name": "EQ Preset"}},
         "number": {
             "bass_level": {"name": "Bass"},
             "treble_level": {"name": "Treble"}
