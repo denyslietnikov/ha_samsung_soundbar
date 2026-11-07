@@ -87,8 +87,20 @@ async def test_existing_switch_ids_and_native_toggles_use_local_readback(
 @pytest.mark.parametrize(
     ("language", "names"),
     (
-        ("en", {"moderate_bass": "Moderate Bass", "spacefit_sound": "SpaceFit Sound"}),
-        ("de", {"moderate_bass": "Moderater Bass", "spacefit_sound": "SpaceFit Sound"}),
+        (
+            "en",
+            {
+                "moderate_bass": "Sound: Moderate Bass",
+                "spacefit_sound": "Sound: SpaceFit Sound",
+            },
+        ),
+        (
+            "de",
+            {
+                "moderate_bass": "Klang: Moderater Bass",
+                "spacefit_sound": "Klang: SpaceFit Sound",
+            },
+        ),
     ),
 )
 async def test_new_switch_names_are_translated_without_changing_ids(

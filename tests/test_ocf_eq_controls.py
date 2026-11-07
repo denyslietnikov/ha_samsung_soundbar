@@ -112,7 +112,8 @@ class TestOcfEqualizer(IsolatedAsyncioTestCase):
         self.assertEqual(device.supported_equalizer_presets, OPTIONS)
         self.assertEqual(device.active_equalizer_preset, "NONE")
         self.assertEqual(device.equalizer_bands, [0] * 7)
-        self.assertTrue(device.can_select_equalizer_preset)
+        self.assertIsNotNone(device.ocf_equalizer.profile)
+        self.assertFalse(device.can_select_equalizer_preset)
         await device.set_equalizer_preset("POP")
         self.assertEqual(
             client.async_write.call_args.args,
@@ -152,7 +153,8 @@ class TestOcfEqualizer(IsolatedAsyncioTestCase):
     async def test_schema_break_or_permission_loss_never_replays_to_cloud(self):
         device, coordinator, client = self.prepare()
         await coordinator.async_refresh_all()
-        self.assertTrue(device.can_select_equalizer_preset)
+        self.assertIsNotNone(device.ocf_equalizer.profile)
+        self.assertFalse(device.can_select_equalizer_preset)
         self.payloads[EQ][P + "EQband"] = ["0"] * 6
         with self.assertRaises(HomeAssistantError):
             await device.set_equalizer_preset("POP")
@@ -192,6 +194,16 @@ class TestOcfEqualizer(IsolatedAsyncioTestCase):
             href=EQ, property=P + "EQname", value="POP"
         )
         client.async_write.assert_not_awaited()
+
+    async def test_cloud_selector_still_requires_explicit_option_and_readable_state(self):
+        device, coordinator, _client = self.prepare(CONTROL_MODE_SMARTTHINGS_CLOUD)
+        await coordinator.async_refresh_all()
+        device._SoundbarDevice__enable_eq = True
+        device._SoundbarDevice__equalizer_supported = True
+        device._SoundbarDevice__supported_eq_presets = ["NONE", "CUSTOM"]
+        self.assertTrue(device.can_select_equalizer_preset)
+        device._SoundbarDevice__enable_eq = False
+        self.assertFalse(device.can_select_equalizer_preset)
 
     async def test_preflight_requires_new_rpc_power_and_mode_not_cached_values(self):
         for failure in ("power", "mode", "missing", "error"):

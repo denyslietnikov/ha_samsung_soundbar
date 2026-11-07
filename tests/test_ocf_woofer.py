@@ -56,7 +56,7 @@ class TestOcfWoofer(IsolatedAsyncioTestCase):
         self.assertTrue(device.can_control_woofer_level)
         entity = number.SoundbarWooferNumberEntity(device, "woofer_level")
         self.assertEqual(entity.unique_id, "soundbar-id_sw_woofer_level")
-        self.assertEqual(entity.name, "Woofer")
+        self.assertEqual(entity.translation_key, "woofer_level")
         self.assertEqual(entity.mode, NumberMode.SLIDER)
         self.assertEqual(
             (entity.native_min_value, entity.native_max_value, entity.native_step),

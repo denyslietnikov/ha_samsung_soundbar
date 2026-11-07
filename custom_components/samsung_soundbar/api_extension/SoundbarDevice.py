@@ -1555,13 +1555,11 @@ class SoundbarDevice:
     @property
     def can_select_equalizer_preset(self) -> bool:
         return bool(
-            self.ocf_equalizer.profile is not None
-            or (
-                self.__enable_eq
-                and not self.cloud_feature_disabled("execute")
-                and self.__equalizer_supported
-                and self.supported_equalizer_presets
-            )
+            self.__enable_eq
+            and not self.local_only
+            and not self.cloud_feature_disabled("execute")
+            and self.__equalizer_supported
+            and self.supported_equalizer_presets
         )
 
     @property

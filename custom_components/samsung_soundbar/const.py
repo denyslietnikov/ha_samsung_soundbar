@@ -1,4 +1,3 @@
-from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.media_player import DOMAIN as MEDIA_PLAYER_DOMAIN
 from homeassistant.components.select import DOMAIN as SELECT_DOMAIN
 from homeassistant.components.switch import DOMAIN as SWITCH_DOMAIN
@@ -108,11 +107,10 @@ EXECUTE_PAYLOAD_PRESETS = {
 
 DEFAULT_NAME = DOMAIN
 
-BUTTON = BUTTON_DOMAIN
 SWITCH = SWITCH_DOMAIN
 MEDIA_PLAYER = MEDIA_PLAYER_DOMAIN
 SELECT = SELECT_DOMAIN
 SUPPORTED_DOMAINS = ["media_player", "switch"]
 
 
-PLATFORMS = [SWITCH, MEDIA_PLAYER, SELECT, BUTTON]
+PLATFORMS = [SWITCH, MEDIA_PLAYER, SELECT]

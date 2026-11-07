@@ -35,6 +35,7 @@ jobs:
           custom_components/samsung_soundbar/config_flow.py
           custom_components/samsung_soundbar/device_info.py
           custom_components/samsung_soundbar/entity_updates.py
+          custom_components/samsung_soundbar/entity_migrations.py
           custom_components/samsung_soundbar/media_player.py
           custom_components/samsung_soundbar/models.py
           custom_components/samsung_soundbar/number.py

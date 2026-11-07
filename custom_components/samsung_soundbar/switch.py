@@ -77,7 +77,7 @@ class SoundbarSwitchAdvancedAudio(SwitchEntity):
         )
         self.__device = device
         display_name = SWITCH_ENTITY_NAMES.get(append_unique_id, append_unique_id)
-        if self._soundbar_audio_field in ("moderate_bass", "spacefit_sound"):
+        if self._soundbar_audio_field in Q800F_AUDIO_SWITCHES:
             self._attr_has_entity_name = True
             self._attr_translation_key = self._soundbar_audio_field
         else:

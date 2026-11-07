@@ -28,7 +28,7 @@ async def test_local_only_setup_reload_and_unload_preserve_ids(hass, entry, tran
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.LOADED
     before = registered(hass, entry)
-    assert len(before) == 7  # media player, two selects, two sensors, two Woofer buttons
+    assert len(before) == 5  # media player, two selects and two sensors
     player_id = next(
         entity_id
         for entity_id, _ in before.values()
@@ -121,7 +121,8 @@ async def test_external_local_state_reaches_actual_ha_entities(hass, entry, tran
     assert player.attributes["volume_level"] == 0.13
     assert player.attributes["is_volume_muted"] is True
     assert hass.states.get("select.soundbar_q800f_sound_mode").state == "Surround"
-    assert hass.states.get("select.soundbar_q800f_input_preset").state == "WIFI"
+    input_id = registered(hass, entry)["existing-cloud-id_sw_input_preset"][0]
+    assert hass.states.get(input_id).state == "WIFI"
     assert hass.states.get("sensor.soundbar_q800f_sound_from").state == "AirPlay"
     transports.auth.assert_not_awaited()
 
@@ -163,6 +164,6 @@ async def test_new_local_only_flow_creates_loaded_entry_without_oauth(hass, tran
     assert new_entry.state is ConfigEntryState.LOADED
     assert new_entry.data[CONF_CONTROL_MODE] == CONTROL_MODE_LOCAL_ONLY
     assert "token" not in new_entry.data
-    assert len(registered(hass, new_entry)) == 7
+    assert len(registered(hass, new_entry)) == 5
     transports.auth.assert_not_awaited()
     transports.api.get_device.assert_not_awaited()

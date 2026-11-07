@@ -91,9 +91,9 @@ features, while the following media controls use local JSON-RPC over LAN:
 - sound mode
 - codec and streaming-source readback
 
-Without a verified OCF Woofer route, Q800F exposes local **Woofer +** and
-**Woofer -** buttons in Hybrid and Local-only modes. They adjust the subwoofer relatively; no absolute level is
-inferred. The buttons require an available LAN connection and an on-state.
+Absolute Woofer control requires the verified OCF route described below.
+The former **Woofer +** and **Woofer -** buttons have been removed; RPC-only
+setups do not infer an absolute subwoofer level from relative commands.
 Volume and mute prefer `volumeControl` / `muteControl`, with legacy fallbacks
 when the device reports that a method is unsupported. Power commands require
 matching local readback rather than only a success acknowledgment.
@@ -141,8 +141,8 @@ recommended. Actual router/device address changes still need field-testing.
 Q800F research has confirmed authenticated local OCF access and Woofer
 read/write/readback. **OCF credential import and storage are available in the
 integration options. OCF audio-setting reads feed the shared coordinator, and
-Q800F has verified local Woofer, Bass and Treble sliders, an EQ preset select and
-six local audio switches. Other
+Q800F has verified local Woofer, Bass and Treble sliders and six local audio
+switches. Local EQ presets remain diagnostic-only. Other
 OCF-backed controls are a later stage. Existing RPC core controls are unchanged.**
 The offline extractor below only validates or explicitly exports
 an existing credential from a selected local file. It makes no network requests
@@ -234,12 +234,11 @@ fresh typed readback. Fractions, booleans and out-of-range levels are rejected.
 Ambiguous or rejected commands are never repeated through Cloud or relative keys.
 External app/remote changes arrive through the existing OCF polling tier.
 
-Local relative-button IDs are retained; they remain available without the verified
-OCF route. Once the absolute route is established they are unavailable, avoiding
-two active control schemes. An OCF outage does not silently reactivate relative
-writes. Existing dashboards/automations using those buttons should be moved to
-the Woofer number when adopting the absolute route; registry entries are not
-deleted or automatically rewritten.
+The former Woofer +/- button entities are removed from the owning integration's
+entity registry during setup, in every control mode. They are not recreated
+after an OCF outage. Existing dashboards/automations referencing those buttons
+need to use the Woofer number instead; their configuration is not rewritten.
+The Woofer number retains its existing unique ID and history.
 
 Owner-approved Q800F/1103.1 probes verified -12, -7, -6 and +6 with exact OCF
 readback, in addition to earlier 0/+1 evidence. In particular, -7 is valid over
@@ -298,22 +297,34 @@ sample, not proof of every integer or every sound-mode combination.
 EQ bands, channel levels and Audio Sync writes remain separate future work.
 Installed-HA and visual SmartThings app checks remain pending.
 
-### Local EQ Presets
+### Control Groups
 
-Authenticated Q800F EQ metadata enables the existing **EQ Preset** select locally,
-with its existing `_sw_eq_preset` unique ID. Available choices come from the device
-and are limited to the verified `NONE`, `POP`, `JAZZ`, `CLASSIC`, `CUSTOM` names.
+Default control names use translated prefixes so HA's alphabetic device page
+keeps related settings together: **Sound: ...**, **Source: Input** and
+**Tone: Bass / Treble / Woofer**. Existing unique IDs and entity IDs are retained.
+Names explicitly customized in HA are not overwritten and determine their own
+position in the list. The standard device page does not provide custom sections.
+
+### EQ Diagnostics and Optional Cloud Selector
+
+Local Q800F EQ metadata does not create an **EQ Preset** select. Although preset
+API write/readback has been verified, useful app/DSP behavior has not. Previously
+created local EQ select entries are integration-disabled, retaining their IDs
+and custom names; they no longer appear among active controls. User-disabled
+entries stay disabled. The explicitly optional **Cloud EQ selector** remains
+available only for models with readable legacy Cloud EQ support.
+
+The guarded local diagnostic backend retains the verified `NONE`, `POP`, `JAZZ`,
+`CLASSIC`, `CUSTOM` names, restricted to metadata reported by the device.
 `NONE` is the neutral EQ preset, not the soundbar's power state or Sound Mode.
-The select can appear later when valid metadata first arrives; outages and
-credential replacement do not delete its registry entry.
 
 The verified context is Standard sound mode, Bass Boost off, power on and local
-`currentEQMode: usereq`. Outside that context the local select is unavailable.
+`currentEQMode: usereq`. Diagnostic writes require that context.
 A command rereads RPC power/sound mode, OCF context and current options under the
 shared queue; missing/error RPC fields cannot reuse old cached prerequisites. It sends
 `EQname` with `action: setEQmode`, and requires exact readback. It never changes
 Sound Mode/Bass Boost or power implicitly, and never retries through Cloud.
-Without a verified local EQ profile the legacy Cloud route is unchanged.
+The optional legacy Cloud route keeps its existing safety checks.
 
 Owner-approved preset probes confirmed all five choices and restored initial
 EQ, neighboring settings and each probe's original power/mode. The seven raw

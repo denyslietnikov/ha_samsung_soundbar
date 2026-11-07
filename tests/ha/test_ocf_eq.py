@@ -1,4 +1,4 @@
-"""Actual HA EQ select, stable registry, context and no Cloud replay."""
+"""Experimental EQ diagnostics stay guarded, without an automatic local select."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -64,7 +64,7 @@ def equalizer(ocf, transports):
     return SimpleNamespace(client=ocf, payloads=payloads, curves=curves)
 
 
-async def test_existing_eq_id_uses_local_options_readback_and_reload(
+async def test_old_eq_id_is_disabled_while_diagnostic_route_stays_guarded(
     hass, entry, transports, equalizer
 ):
     old = er.async_get(hass).async_get_or_create(
@@ -74,16 +74,15 @@ async def test_existing_eq_id_uses_local_options_readback_and_reload(
     await hass.async_block_till_done()
     entity_id = registered(hass, entry)[UNIQUE][0]
     assert entity_id == old.entity_id
-    assert hass.states.get(entity_id).state == "NONE"
-    assert hass.states.get(entity_id).attributes["options"] == OPTIONS
-    await hass.services.async_call(
-        "select",
-        "select_option",
-        {"entity_id": entity_id, "option": "POP"},
-        blocking=True,
+    assert (
+        er.async_get(hass).async_get(entity_id).disabled_by
+        is er.RegistryEntryDisabler.INTEGRATION
     )
+    assert hass.states.get(entity_id) is None
+    assert entry.runtime_data.device.supported_equalizer_presets == OPTIONS
+    await entry.runtime_data.device.set_equalizer_preset("POP")
     await hass.async_block_till_done()
-    assert hass.states.get(entity_id).state == "POP"
+    assert entry.runtime_data.device.active_equalizer_preset == "POP"
     assert entry.runtime_data.device.equalizer_bands == [0, -3, 3, 1, -5, 0, 0]
     equalizer.client.async_write.assert_awaited_once_with(
         EQ, {P + "EQname": "POP", P + "action": "setEQmode"}, eq_profile=Q800F_EQ
@@ -108,7 +107,8 @@ async def test_late_eq_discovery_and_external_preset_change(
     equalizer.payloads[EQ] = payload
     await entry.runtime_data.coordinator.async_refresh_all()
     await hass.async_block_till_done()
-    assert hass.states.get(registered(hass, entry)[UNIQUE][0]).state == "JAZZ"
+    assert UNIQUE not in registered(hass, entry)
+    assert entry.runtime_data.device.active_equalizer_preset == "JAZZ"
     equalizer.client.async_write.assert_not_awaited()
 
 
@@ -137,7 +137,7 @@ async def test_unavailable_context_never_auto_changes_or_falls_back(
     await entry.runtime_data.coordinator.async_refresh_all()
     await hass.async_block_till_done()
     assert registered(hass, entry) == before
-    assert hass.states.get(before[UNIQUE][0]).state == "unavailable"
+    assert not entry.runtime_data.device.ocf_equalizer.available
     with pytest.raises(HomeAssistantError):
         await entry.runtime_data.device.set_equalizer_preset("POP")
     equalizer.client.async_write.assert_not_awaited()
@@ -151,18 +151,12 @@ async def test_failed_write_does_not_publish_optimistic_eq(
 ):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    entity_id = registered(hass, entry)[UNIQUE][0]
     equalizer.client.async_write.side_effect = None
     equalizer.client.async_write.return_value = OcfWriteResult(False, False, True, None)
     with pytest.raises(HomeAssistantError) as error:
-        await hass.services.async_call(
-            "select",
-            "select_option",
-            {"entity_id": entity_id, "option": "POP"},
-            blocking=True,
-        )
+        await entry.runtime_data.device.set_equalizer_preset("POP")
     assert error.value.translation_key == "ocf_eq_unconfirmed"
-    assert hass.states.get(entity_id).state == "NONE"
+    assert entry.runtime_data.device.active_equalizer_preset == "NONE"
     equalizer.client.async_write.assert_awaited_once()
 
 
@@ -180,6 +174,9 @@ async def test_preflight_rechecks_options_and_context_under_queue(
 async def test_forget_reimport_preserves_eq_registry_id(
     hass, entry, transports, equalizer
 ):
+    old = er.async_get(hass).async_get_or_create(
+        "select", DOMAIN, UNIQUE, config_entry=entry, suggested_object_id="old_eq"
+    )
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     before = registered(hass, entry)
@@ -188,7 +185,10 @@ async def test_forget_reimport_preserves_eq_registry_id(
     hass.config_entries.async_update_entry(entry, data=data)
     await hass.async_block_till_done()
     assert registered(hass, entry) == before
-    assert hass.states.get(before[UNIQUE][0]).state == "unavailable"
+    assert (
+        er.async_get(hass).async_get(old.entity_id).disabled_by
+        is er.RegistryEntryDisabler.INTEGRATION
+    )
     hass.config_entries.async_update_entry(entry, data={**data, "ocf_configured": True})
     await hass.async_block_till_done()
     assert registered(hass, entry) == before
@@ -208,12 +208,6 @@ async def test_service_reads_actual_rpc_context_even_with_fresh_old_cache(
         transports.rpc.sound_mode.return_value = None
     else:
         transports.rpc.sound_mode.side_effect = LocalRpcError("offline")
-    entity_id = registered(hass, entry)[UNIQUE][0]
     with pytest.raises(HomeAssistantError):
-        await hass.services.async_call(
-            "select",
-            "select_option",
-            {"entity_id": entity_id, "option": "POP"},
-            blocking=True,
-        )
+        await entry.runtime_data.device.set_equalizer_preset("POP")
     equalizer.client.async_write.assert_not_awaited()

@@ -15,17 +15,26 @@
         }
     },
     "entity": {
-        "select": {"eq_preset": {"name": "EQ Preset"}},
+        "select": {
+            "eq_preset": {"name": "EQ Preset"},
+            "sound_mode_preset": {"name": "Sound: Mode"},
+            "input_preset": {"name": "Source: Input"}
+        },
         "number": {
-            "bass_level": {"name": "Bass"},
-            "treble_level": {"name": "Treble"}
+            "bass_level": {"name": "Tone: Bass"},
+            "treble_level": {"name": "Tone: Treble"},
+            "woofer_level": {"name": "Tone: Woofer"}
         },
         "switch": {
+            "bass_mode": {"name": "Sound: Bass Boost"},
+            "night_mode": {"name": "Sound: Night Mode"},
+            "voice_amplifier": {"name": "Sound: Voice Amplifier"},
+            "virtual_sound": {"name": "Sound: Virtual"},
             "moderate_bass": {
-                "name": "Moderate Bass"
+                "name": "Sound: Moderate Bass"
             },
             "spacefit_sound": {
-                "name": "SpaceFit Sound"
+                "name": "Sound: SpaceFit Sound"
             }
         }
     },
@@ -173,7 +182,7 @@
             "reconfigure_confirm": {
                 "data": {
                     "settings_advanced_audio": "Enable optional Cloud Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier, Virtual)",
-                    "settings_eq": "Enable 'EQ selector' capabilities",
+                    "settings_eq": "Enable Cloud EQ selector (supported models)",
                     "settings_soundmode": "Enable 'Soundmode selector' capabilities",
                     "settings_woofer": "Enable optional Cloud Woofer number entity",
                     "device_volume": "Max Volume (int)"
@@ -245,7 +254,7 @@
                     "local_timeout": "Local RPC timeout",
                     "local_fallback_to_cloud": "Fallback to SmartThings Cloud when local RPC fails",
                     "settings_advanced_audio": "Enable optional Cloud Advanced Audio switches (Night Mode, Bass Mode, Voice Amplifier, Virtual)",
-                    "settings_eq": "Enable EQ selector",
+                    "settings_eq": "Enable Cloud EQ selector (supported models)",
                     "settings_soundmode": "Enable Sound Mode selector",
                     "settings_woofer": "Enable optional Cloud Woofer number entity",
                     "device_volume": "Maximum volume",

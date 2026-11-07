@@ -15,17 +15,26 @@
         }
     },
     "entity": {
-        "select": {"eq_preset": {"name": "EQ-Preset"}},
+        "select": {
+            "eq_preset": {"name": "EQ-Preset"},
+            "sound_mode_preset": {"name": "Klang: Modus"},
+            "input_preset": {"name": "Quelle: Eingang"}
+        },
         "number": {
-            "bass_level": {"name": "Bass"},
-            "treble_level": {"name": "Höhen"}
+            "bass_level": {"name": "Ton: Bass"},
+            "treble_level": {"name": "Ton: Höhen"},
+            "woofer_level": {"name": "Ton: Subwoofer"}
         },
         "switch": {
+            "bass_mode": {"name": "Klang: Bass Boost"},
+            "night_mode": {"name": "Klang: Nachtmodus"},
+            "voice_amplifier": {"name": "Klang: Sprachverstärker"},
+            "virtual_sound": {"name": "Klang: Virtual"},
             "moderate_bass": {
-                "name": "Moderater Bass"
+                "name": "Klang: Moderater Bass"
             },
             "spacefit_sound": {
-                "name": "SpaceFit Sound"
+                "name": "Klang: SpaceFit Sound"
             }
         }
     },
@@ -159,7 +168,7 @@
             "reconfigure_confirm":{
                 "data" : {
                     "settings_advanced_audio": "'Advanced Audio switches' aktivieren (NightMode, BassMode, VoiceEnhancer, Virtual)",
-                    "settings_eq": "'EQ selector' aktivieren",
+                    "settings_eq": "Cloud-EQ-Auswahl aktivieren (unterstützte Modelle)",
                     "settings_soundmode": "'Soundmode selector' aktivieren",
                     "settings_woofer": "'Subwoofer Entität' aktivieren",
                     "device_volume": "Max Volume (int)"
@@ -212,7 +221,7 @@
                     "local_timeout": "Lokales RPC Timeout",
                     "local_fallback_to_cloud": "Bei lokalem RPC Fehler auf SmartThings Cloud zurückfallen",
                     "settings_advanced_audio": "Advanced Audio Switches aktivieren (Nachtmodus, Bassmodus, Stimmenverstärker, Virtual)",
-                    "settings_eq": "EQ Selector aktivieren",
+                    "settings_eq": "Cloud-EQ-Auswahl aktivieren (unterstützte Modelle)",
                     "settings_soundmode": "SoundMode Selector aktivieren",
                     "settings_woofer": "Subwoofer Number Entity aktivieren",
                     "device_volume": "Maximale Lautstärke"

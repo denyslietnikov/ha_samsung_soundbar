@@ -1,8 +1,7 @@
 """Real HA Woofer slider, stable IDs, route availability and service validation."""
 
-import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -160,47 +159,3 @@ async def test_cloud_disabled_execute_does_not_disable_verified_ocf_number(
     device.coordinator.publish()
     await hass.async_block_till_done()
     assert hass.states.get(registered(hass, entry)[UNIQUE][0]).state == "-6"
-
-
-async def test_queued_legacy_button_service_cannot_outlive_ocf_route_change(
-    hass, entry, transports, ocf
-):
-    ocf.async_read = AsyncMock(return_value={})
-    transports.rpc.remote_key = AsyncMock()
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    button_id = registered(hass, entry)["existing-cloud-id_btn_woofer_plus"][0]
-    assert hass.states.get(button_id).state != "unavailable"
-    coordinator = entry.runtime_data.coordinator
-    started, release, queued = asyncio.Event(), asyncio.Event(), asyncio.Event()
-
-    async def read(href):
-        started.set()
-        await release.wait()
-        return {FIELD: -6, CONNECTION: "on"}
-
-    ocf.async_read.side_effect = read
-    poll = asyncio.create_task(coordinator.async_ocf_snapshot((HREF,)))
-    await started.wait()
-    original = coordinator.async_write
-
-    async def enqueue(*args, **kwargs):
-        queued.set()
-        return await original(*args, **kwargs)
-
-    with patch.object(coordinator, "async_write", new=enqueue):
-        press = asyncio.create_task(
-            hass.services.async_call(
-                "button", "press", {"entity_id": button_id}, blocking=True
-            )
-        )
-        try:
-            await asyncio.wait_for(queued.wait(), 1)
-            release.set()
-            await poll
-            with pytest.raises(HomeAssistantError):
-                await press
-            transports.rpc.remote_key.assert_not_awaited()
-        finally:
-            release.set()
-            await asyncio.gather(poll, press, return_exceptions=True)

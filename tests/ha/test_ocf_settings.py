@@ -50,7 +50,7 @@ async def test_native_tone_sliders_read_write_and_reload(hass, entry, transports
     assert bass == old.entity_id
     state = hass.states.get(bass)
     assert state.state == "0"
-    assert state.attributes["friendly_name"] == "Soundbar Q800F Bass"
+    assert state.attributes["friendly_name"] == "Soundbar Q800F Tone: Bass"
     assert (
         state.attributes["min"],
         state.attributes["max"],

@@ -35,11 +35,6 @@ def register_device_update_listener(
             return device.audio_switch_available(audio_field)
         if getattr(entity, "_soundbar_woofer_absolute", False) is True:
             return device.woofer_control_available
-        if (
-            getattr(entity, "_soundbar_woofer_relative", False) is True
-            and device.ocf_woofer_profile is not None
-        ):
-            return False
         ocf_fields = getattr(entity, "_soundbar_ocf_fields", ())
         if isinstance(ocf_fields, (tuple, list)) and ocf_fields:
             return (

@@ -87,6 +87,7 @@ from .const import (
     SERVICE_DUMP_STATUS_SUMMARY,
 )
 from .coordinator import SoundbarCoordinator
+from .entity_migrations import async_remove_woofer_buttons
 from .entry_options import get_entry_option
 from .local_device import LocalDevice
 from .local_ocf import LocalSoundbarOcfClient, OcfError
@@ -106,7 +107,7 @@ from .subscription import async_remove_subscription, async_setup_subscription
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "switch", "number", "select", "sensor", "button"]
+PLATFORMS = ["media_player", "switch", "number", "select", "sensor"]
 
 DUMP_EXECUTE_PAYLOAD_SCHEMA = vol.Schema(
     {
@@ -209,6 +210,7 @@ async def _async_setup_entry(hass: HomeAssistant, entry: SoundbarConfigEntry) ->
 
     _LOGGER.info("[%s] Setting up entry", DOMAIN)
     _async_remove_legacy_artwork_entity(hass, entry)
+    async_remove_woofer_buttons(hass, entry)
 
     if get_entry_option(entry, CONF_CONTROL_MODE) == CONTROL_MODE_LOCAL_ONLY:
         clear_cloud_issues(hass, entry)

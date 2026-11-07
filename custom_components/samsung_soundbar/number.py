@@ -75,6 +75,7 @@ class SoundbarToneNumberEntity(NumberEntity):
 
 
 class SoundbarWooferNumberEntity(NumberEntity):
+    _attr_has_entity_name = True
     _soundbar_woofer_absolute = True
     _soundbar_cloud_only = True
     _soundbar_cloud_capabilities = ("execute",)
@@ -91,6 +92,7 @@ class SoundbarWooferNumberEntity(NumberEntity):
             native_step=1,
             native_unit_of_measurement="dB",
             key=append_unique_id,
+            translation_key="woofer_level",
         )
         self.__device = device
         self._attr_unique_id = f"{device.device_id}_sw_{append_unique_id}"
@@ -98,10 +100,6 @@ class SoundbarWooferNumberEntity(NumberEntity):
         self.__append_unique_id = append_unique_id
 
     # ---------- GENERAL ---------------
-
-    @property
-    def name(self):
-        return "Woofer"
 
     # ------ STATE FUNCTIONS --------
 

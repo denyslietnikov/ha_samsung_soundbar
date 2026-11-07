@@ -9,6 +9,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .api_extension.SoundbarDevice import SoundbarDevice
 from .device_info import build_device_info
+from .entity_migrations import async_sync_eq_entity
 from .entity_updates import register_device_update_listener
 from .models import SoundbarConfigEntry
 
@@ -42,6 +43,7 @@ async def async_setup_entry(
 
     def discover_eq():
         nonlocal eq_added
+        async_sync_eq_entity(hass, config_entry, device.can_select_equalizer_preset)
         if eq_added or not device.can_select_equalizer_preset:
             return
         eq_added = True
@@ -116,6 +118,7 @@ class EqPresetSelectEntity(SelectEntity):
 
 
 class SoundModeSelectEntity(SelectEntity, RestoreEntity):
+    _attr_has_entity_name = True
     _soundbar_cloud_capabilities = ("execute",)
 
     def __init__(
@@ -126,6 +129,7 @@ class SoundModeSelectEntity(SelectEntity, RestoreEntity):
     ):
         self.entity_description = SelectEntityDescription(
             key=append_unique_id,
+            translation_key="sound_mode_preset",
         )
         self.__base_icon = icon_string
         self.__device = device
@@ -134,10 +138,6 @@ class SoundModeSelectEntity(SelectEntity, RestoreEntity):
         self.__append_unique_id = append_unique_id
 
     # ---------- GENERAL ---------------
-
-    @property
-    def name(self):
-        return SELECT_ENTITY_NAMES.get(self.__append_unique_id, self.__append_unique_id)
 
     @property
     def options(self) -> list[str]:
@@ -180,6 +180,7 @@ class SoundModeSelectEntity(SelectEntity, RestoreEntity):
 
 
 class InputSelectEntity(SelectEntity, RestoreEntity):
+    _attr_has_entity_name = True
     _soundbar_cloud_capabilities = ("mediaInputSource", "samsungvd.audioInputSource")
 
     def __init__(
@@ -190,6 +191,7 @@ class InputSelectEntity(SelectEntity, RestoreEntity):
     ):
         self.entity_description = SelectEntityDescription(
             key=append_unique_id,
+            translation_key="input_preset",
         )
         self.__base_icon = icon_string
         self.__device = device
@@ -198,10 +200,6 @@ class InputSelectEntity(SelectEntity, RestoreEntity):
         self.__append_unique_id = append_unique_id
 
     # ---------- GENERAL ---------------
-
-    @property
-    def name(self):
-        return SELECT_ENTITY_NAMES.get(self.__append_unique_id, self.__append_unique_id)
 
     @property
     def options(self) -> list[str]:
