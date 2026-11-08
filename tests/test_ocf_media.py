@@ -66,15 +66,15 @@ class TestOcfMedia(TestCase):
                     {"status": {"state": "value", "value": status}},
                 )
 
-    def test_observed_q800f_airplay_uppercase_status_is_preserved_not_interpreted(self):
-        for status in ("PLAYING", "STOPPED"):
+    def test_observed_q800f_uppercase_status_is_preserved_not_interpreted(self):
+        for status in ("PLAYING", "STOPPED", "PAUSED"):
             with self.subTest(status=status):
                 self.assertEqual(
                     self.fields("playback", {PREFIX + "status": status})["status"],
                     {"state": "value", "value": status},
                 )
         self.assertEqual(
-            self.fields("playback", {PREFIX + "status": "PAUSED"})["status"],
+            self.fields("playback", {PREFIX + "status": "BUFFERING"})["status"],
             {"state": "unrecognized"},
         )
 

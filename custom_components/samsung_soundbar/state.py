@@ -11,9 +11,9 @@ LOCAL_TTL = 120.0
 STREAMING_TTL = 15.0
 WRITE_SETTLE_TIME = 5.0
 MEDIA_CONTEXT = {
-    "power": "on",
-    "input_source": "WIFI",
-    "sound_from_detail_name": "AirPlay",
+    "power": ("on",),
+    "input_source": ("WIFI",),
+    "sound_from_detail_name": ("AirPlay", "Roon"),
 }
 LOCAL_FIELDS = frozenset(
     {
@@ -96,7 +96,7 @@ class SoundbarState:
             if (
                 record is None
                 or not record.fresh(now)
-                or record.value != expected
+                or record.value not in expected
                 or record.observed_at < self.written_at.get(key, float("-inf"))
                 or pending is not None
                 and pending.fresh(now)

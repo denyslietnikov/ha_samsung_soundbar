@@ -93,6 +93,46 @@ class TestTrackState(TestCase):
         self.assertEqual(self.state.media_context(), before)
         self.assertEqual(self.state.value("media_title"), "Track")
 
+    def test_native_roon_text_is_ocf_owned_and_expires_independently(self):
+        self.state.merge("rpc", {**AIRPLAY, "sound_from_detail_name": "Roon"})
+        self.assertIsNotNone(self.state.media_context())
+        self.state.merge("rpc", TEXT)
+        self.assertIsNone(self.state.value("media_title"))
+        self.put_text()
+        self.assertEqual(self.state.value("media_title"), "Track")
+        self.assertEqual(self.state.resolve("media_title").source, "ocf")
+        self.assertEqual(self.state.resolve("media_title").ttl, 15.0)
+        self.now = 17
+        self.state.merge("rpc", {**AIRPLAY, "sound_from_detail_name": "Roon"})
+        self.assertIsNone(self.state.value("media_title"))
+
+    def test_provider_change_revokes_text_even_when_normalized_input_is_wifi(self):
+        for before, after in (("AirPlay", "Roon"), ("Roon", "AirPlay")):
+            with self.subTest(before=before, after=after):
+                self.setUp()
+                self.state.merge("rpc", {"sound_from_detail_name": before})
+                self.put_text()
+                token = self.state.media_context()
+                self.assertIsNotNone(token)
+                self.state.merge("rpc", {"sound_from_detail_name": after})
+                self.assertIsNotNone(self.state.media_context())
+                self.assertNotEqual(self.state.media_context(), token)
+                self.assertIsNone(self.state.value("media_title"))
+                self.state.merge("rpc", {"sound_from_detail_name": before})
+                self.assertNotEqual(self.state.media_context(), token)
+
+    def test_unverified_streaming_never_surfaces_retained_roon_metadata(self):
+        for detail in ("Google Cast", "External Device", "Spotify", [], False, 1):
+            with self.subTest(detail=detail):
+                self.setUp()
+                self.state.merge("rpc", {"sound_from_detail_name": "Roon"})
+                self.put_text()
+                self.assertEqual(self.state.value("media_title"), "Track")
+                self.state.merge("rpc", {"sound_from_detail_name": detail})
+                self.state.merge("ocf", TEXT)
+                self.assertIsNone(self.state.media_context())
+                self.assertIsNone(self.state.value("media_title"))
+
     def test_local_only_never_accepts_ocf_or_rpc_track_text(self):
         self.state.use_ocf = False
         self.state.merge("rpc", TEXT)

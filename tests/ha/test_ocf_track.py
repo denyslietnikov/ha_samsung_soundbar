@@ -1,4 +1,4 @@
-"""AirPlay text reaches real HA entities without widening playback or diagnostics."""
+"""Verified streaming text reaches HA without widening playback or diagnostics."""
 
 import asyncio
 from copy import deepcopy
@@ -150,13 +150,22 @@ async def test_native_ha_text_changes_without_new_entities_or_pollers(
     track.client.async_write.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    "wire_source,statuses",
+    (
+        ("WIFI_AIRPLAY", ("PLAYING", "STOPPED", "PLAYING")),
+        ("CD", ("PLAYING", "PAUSED", "PLAYING")),
+    ),
+)
 async def test_pause_diagnostics_preserve_text_and_never_derive_playback(
-    hass, entry, track
+    hass, entry, track, wire_source, statuses
 ):
+    track.status["input_source"] = wire_source
+    track.rpc.input_source.return_value = wire_source
     await setup(hass, entry)
     before = player(hass, entry)
     features = before.attributes["supported_features"]
-    for status in ("PLAYING", "STOPPED", "PLAYING"):
+    for status in statuses:
 
         async def read(href, status=status):
             if href == PLAYBACK:
@@ -184,6 +193,47 @@ async def test_pause_diagnostics_preserve_text_and_never_derive_playback(
     for feature in ("PLAY", "PAUSE", "STOP", "NEXT_TRACK", "PREVIOUS_TRACK", "SEEK"):
         assert not features & getattr(MediaPlayerEntityFeature, feature)
     track.client.async_write.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "wire_source,detail", (("WIFI_AIRPLAY", "AirPlay"), ("CD", "Roon"))
+)
+async def test_verified_provider_text_refreshes_and_clears_on_source_exit(
+    hass, entry, track, wire_source, detail
+):
+    track.status["input_source"] = wire_source
+    track.rpc.input_source.return_value = wire_source
+    coordinator = await setup(hass, entry)
+    before = registered(hass, entry)
+    assert_text(hass, entry, PRIVATE)
+    assert coordinator.state.value("sound_from_detail_name") == detail
+    assert player(hass, entry).attributes["source"] == "WIFI"
+    track.payload.update(title="Next", artist="Next artist", album="Next album")
+    await refresh(hass, entry)
+    assert_text(hass, entry, ("Next", "Next artist", "Next album"))
+    # OCF may retain the old Roon text even after RPC has left that input.
+    track.status["input_source"] = "E_ARC"
+    track.rpc.input_source.return_value = "E_ARC"
+    await refresh(hass, entry)
+    assert_text(hass, entry, (None, None, None))
+    assert player(hass, entry).state == "on"
+    assert registered(hass, entry) == before
+
+
+async def test_cast_never_receives_retained_native_roon_text(hass, entry, track):
+    track.status["input_source"] = "CD"
+    track.rpc.input_source.return_value = "CD"
+    await setup(hass, entry)
+    assert_text(hass, entry, PRIVATE)
+    track.status["input_source"] = "WIFI_GOOGLE"
+    track.rpc.input_source.return_value = "WIFI_GOOGLE"
+    await refresh(hass, entry)
+    assert_text(hass, entry, (None, None, None))
+    assert player(hass, entry).attributes["source"] == "WIFI"
+    assert entry.runtime_data.device.sound_from_detail_name == "Google Cast"
+    track.client.async_read.reset_mock()
+    await refresh(hass, entry)
+    assert TRACK not in hrefs(track)
 
 
 @pytest.mark.parametrize("source", ("WIFI_IDLE", "WIFI_GOOGLE", "BT", "E_ARC"))
@@ -547,6 +597,41 @@ async def delayed_track(hass, entry, track):
         unsubscribe()
         raise
     return task, release, titles, unsubscribe
+
+
+@pytest.mark.parametrize("start,end", (("WIFI_AIRPLAY", "CD"), ("CD", "WIFI_AIRPLAY")))
+@pytest.mark.parametrize("roundtrip", (False, True))
+async def test_delayed_track_cannot_cross_eligible_providers(
+    hass, entry, track, start, end, roundtrip
+):
+    track.status["input_source"] = start
+    track.rpc.input_source.return_value = start
+    coordinator = await setup(hass, entry)
+    assert_text(hass, entry, PRIVATE)
+    task, release, titles, unsubscribe = await delayed_track(hass, entry, track)
+    details = {"WIFI_AIRPLAY": "AirPlay", "CD": "Roon"}
+    try:
+        coordinator.receive("rpc", {"sound_from_detail_name": details[end]})
+        if roundtrip:
+            coordinator.receive("rpc", {"sound_from_detail_name": details[start]})
+        assert coordinator.state.media_context() is not None
+        assert_text(hass, entry, (None, None, None))
+        release.set()
+        await asyncio.wait_for(task, 1)
+        await hass.async_block_till_done()
+        assert "DELAYED_OLD_TRACK" not in titles
+        assert_text(hass, entry, (None, None, None))
+        target = start if roundtrip else end
+        track.status["input_source"] = target
+        track.rpc.input_source.return_value = target
+        track.payload.clear()
+        track.payload.update(title="Target provider", artist="Target artist")
+        await refresh(hass, entry)
+        assert_text(hass, entry, ("Target provider", "Target artist", None))
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        unsubscribe()
 
 
 @pytest.mark.parametrize(

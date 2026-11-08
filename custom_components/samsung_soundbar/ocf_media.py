@@ -16,7 +16,7 @@ MEDIA_HREFS = tuple(
     )
 )
 
-# Exact uppercase variants observed on Q800F; STOPPED also occurs on AirPlay pause.
+# Q800F reports STOPPED on AirPlay pause, but PAUSED on native Roon pause.
 _STATUS = frozenset(
     {
         "play",
@@ -28,6 +28,7 @@ _STATUS = frozenset(
         "idle",
         "PLAYING",
         "STOPPED",
+        "PAUSED",
     }
 )
 _PLAYBACK_MODES = frozenset({"play", "pause", "stop", "fastforward", "rewind"})
