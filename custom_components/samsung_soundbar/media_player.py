@@ -5,6 +5,7 @@ from typing import Any
 from homeassistant.components.media_player import (
     MediaPlayerDeviceClass,
     MediaPlayerEntity,
+    MediaType,
 )
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
 from homeassistant.core import HomeAssistant
@@ -79,6 +80,10 @@ class SoundbarMediaPlayer(MediaPlayerEntity):
     @property
     def media_album_name(self) -> str | None:
         return self.device.media_album_name
+
+    @property
+    def media_content_type(self) -> MediaType | None:
+        return MediaType.MUSIC if self.media_title else None
 
     # ---------- POWER ON/OFF ------------
 

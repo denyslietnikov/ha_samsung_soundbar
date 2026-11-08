@@ -53,6 +53,7 @@ class TestMediaTextPresentation(IsolatedAsyncioTestCase):
         self.assertIsNone(entity.media_title)
         self.assertIsNone(entity.media_artist)
         self.assertIsNone(entity.media_album_name)
+        self.assertIsNone(entity.media_content_type)
 
         values.update(
             media_title="Private title",
@@ -62,6 +63,7 @@ class TestMediaTextPresentation(IsolatedAsyncioTestCase):
         self.assertEqual(entity.media_title, "Private title")
         self.assertEqual(entity.media_artist, "Private artist")
         self.assertEqual(entity.media_album_name, "Private album")
+        self.assertEqual(entity.media_content_type, "music")
         self.assertEqual(entity.supported_features, features)
         self.assertIsNone(entity.state)
         for field in values:
@@ -79,6 +81,7 @@ class TestMediaTextPresentation(IsolatedAsyncioTestCase):
         self.assertIsNone(entity.media_title)
         self.assertIsNone(entity.media_artist)
         self.assertIsNone(entity.media_album_name)
+        self.assertIsNone(entity.media_content_type)
         self.assertEqual(self.rpc.mock_calls, [])
 
     def test_support_data_redacts_text_without_reading_native_properties(self):

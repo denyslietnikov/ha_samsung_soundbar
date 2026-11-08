@@ -106,6 +106,9 @@ def assert_text(hass, entry, values):
     state = player(hass, entry)
     device = entry.runtime_data.device
     assert tuple(state.attributes.get(field) for field in TEXT_FIELDS) == values
+    assert state.attributes.get("media_content_type") == (
+        "music" if values[0] else None
+    )
     assert tuple(getattr(device, field) for field in TEXT_FIELDS) == values
     assert (
         tuple(device.coordinator.media_text_value(field) for field in TEXT_FIELDS)
